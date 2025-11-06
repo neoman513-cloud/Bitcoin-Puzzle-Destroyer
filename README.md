@@ -33,7 +33,7 @@ also in secp256k1.cuh there are few parameters at top of the file:\
 
 in case if this was useful to you, can you please donate BTC:
 
-bc1q8n38pk3urztlt4vceq0h089l9jdcw58l2c0e80
+`bc1q8n38pk3urztlt4vceq0h089l9jdcw58l2c0e80`
 
 so i will be more motivated to develop further this project
 
