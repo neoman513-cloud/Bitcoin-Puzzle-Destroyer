@@ -2,7 +2,7 @@ This is my own Hand-Made project
 
 This program searches for Bitcoin Puzzles on any range
 
-THIS PURE TRUE UNBIASED RANDOM, with real speed, not fake
+THIS IS PURE TRUE UNBIASED RANDOM, with real speed, not fake
 
 it uses a Cuda specialized random distribution that is Curand + CPU crypto secure random combined and millions of threads, no overlaps
 
