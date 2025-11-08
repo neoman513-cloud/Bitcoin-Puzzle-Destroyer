@@ -247,6 +247,9 @@ __global__ void start(const uint8_t* target, uint64_t p1, uint64_t p2, uint64_t 
             scalar_multiply_multi_base_jac(&result_jac_batch[i], &priv_batch[i]);
         }
         
+        // Batch convert to hash160
+        jacobian_batch_to_hash160(result_jac_batch, hash160_batch);
+		
         // Check results
         #pragma unroll
         for (int i = 0; i < BATCH_SIZE; ++i) {
