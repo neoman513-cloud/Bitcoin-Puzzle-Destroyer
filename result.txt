@@ -616,3 +616,28 @@ Total keys checked: 4898947072
 Time taken: 55.244 seconds
 Average speed: 88.6783 MK/s
 
+[2025-11-09 12:46:00] Found: 1a96ca8d8 -> 4e15e5189752d1eaf444dfd6bff399feb0443977
+Total keys checked: 469762048
+Time taken: 5.2767 seconds
+Average speed: 89.0258 MK/s
+
+[2025-11-09 14:30:22] Found: 1a96ca8d8 -> 4e15e5189752d1eaf444dfd6bff399feb0443977
+Total keys checked: 2080374784
+Time taken: 23.798 seconds
+Average speed: 87.418 MK/s
+
+[2025-11-09 14:55:12] Found: 1a96ca8d8 -> 4e15e5189752d1eaf444dfd6bff399feb0443977
+Total keys checked: 872415232
+Time taken: 9.45045 seconds
+Average speed: 92.3147 MK/s
+
+[2025-11-09 15:02:26] Found: 1a96ca8d8 -> 4e15e5189752d1eaf444dfd6bff399feb0443977
+Total keys checked: 2717908992
+Time taken: 31.1953 seconds
+Average speed: 87.1255 MK/s
+
+[2025-11-09 15:07:35] Found: 1a96ca8d8 -> 4e15e5189752d1eaf444dfd6bff399feb0443977
+Total keys checked: 3355443200
+Time taken: 35.9139 seconds
+Average speed: 93.4302 MK/s
+
