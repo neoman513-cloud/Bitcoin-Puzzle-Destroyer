@@ -1281,8 +1281,20 @@ void print_gpu_info() {
         printf("  Multiprocessors: %d\n", deviceProp.multiProcessorCount);
         printf("  CUDA Cores: ~%d\n", 
                deviceProp.multiProcessorCount * 128); // Approximate
+        #if __CUDACC_VER_MAJOR__ <= 12
         printf("  Clock Rate: %.2f GHz\n", 
                deviceProp.clockRate / 1e6);
+        #else
+        int deviceId, clockRateKHz;
+        cudaGetDevice(&deviceId);
+        cudaError_t err = cudaDeviceGetAttribute(&clockRateKHz, cudaDevAttrClockRate, deviceId);
+        if (err == cudaSuccess) {
+            printf("  Clock Rate: %.2f GHz\n",
+                   clockRateKHz / 1e6);
+        } else {
+            fprintf(stderr, "Failed to get clock rate: %s\n", cudaGetErrorString(err));
+        }
+        #endif
         printf("\n");
     }
 }

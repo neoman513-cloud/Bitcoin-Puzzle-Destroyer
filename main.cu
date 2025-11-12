@@ -13,9 +13,13 @@
 #include <algorithm>
 #include <random>
 #include <inttypes.h>
+#if defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(WIN64) || defined(_WIN64) || defined(__WIN64__) || defined(__NT__)
 #include <windows.h>
 #include <bcrypt.h>
 #pragma comment(lib, "bcrypt.lib")
+#elif defined(__linux__)
+#include <sys/random.h>
+#endif
 #include <chrono>
 #pragma once
 
@@ -284,7 +288,11 @@ bool run_with_quantum_data(const char* min, const char* max, const char* target,
     uint64_t total_keys_checked = 0;
     auto start_time = std::chrono::high_resolution_clock::now();
     auto last_print_time = start_time;
+        #if defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(WIN64) || defined(_WIN64) || defined(__WIN64__) || defined(__NT__)
 	BCryptGenRandom(NULL, (PUCHAR)&p1, sizeof(p1), BCRYPT_USE_SYSTEM_PREFERRED_RNG);
+        #elif defined(__linux__)
+        getrandom((unsigned char *)&p1, sizeof(p1), GRND_RANDOM);
+        #endif
     while(true) {
         auto kernel_start = std::chrono::high_resolution_clock::now();
         
