@@ -7,7 +7,7 @@
 #define BIGINT_WORDS 8
 #define WINDOW_SIZE 18
 #define NUM_BASE_POINTS 32
-#define BATCH_SIZE 64
+#define BATCH_SIZE 150
 #define MOD_EXP 5
 
 
@@ -756,223 +756,319 @@ __device__ __forceinline__ void add_point_jac(ECPointJac *R, const ECPointJac *P
     R->infinity = false;
 }
 
+// Optimized SHA-256 implementation for CUDA
 
-__device__ inline uint32_t rotr(uint32_t x, uint32_t n) {
+// Use constant memory for K constants (better caching)
+__constant__ uint32_t c_K[64] = {
+    0x428a2f98ul,0x71374491ul,0xb5c0fbcful,0xe9b5dba5ul,
+    0x3956c25bul,0x59f111f1ul,0x923f82a4ul,0xab1c5ed5ul,
+    0xd807aa98ul,0x12835b01ul,0x243185beul,0x550c7dc3ul,
+    0x72be5d74ul,0x80deb1feul,0x9bdc06a7ul,0xc19bf174ul,
+    0xe49b69c1ul,0xefbe4786ul,0x0fc19dc6ul,0x240ca1ccul,
+    0x2de92c6ful,0x4a7484aaul,0x5cb0a9dcul,0x76f988daul,
+    0x983e5152ul,0xa831c66dul,0xb00327c8ul,0xbf597fc7ul,
+    0xc6e00bf3ul,0xd5a79147ul,0x06ca6351ul,0x14292967ul,
+    0x27b70a85ul,0x2e1b2138ul,0x4d2c6dfcul,0x53380d13ul,
+    0x650a7354ul,0x766a0abbul,0x81c2c92eul,0x92722c85ul,
+    0xa2bfe8a1ul,0xa81a664bul,0xc24b8b70ul,0xc76c51a3ul,
+    0xd192e819ul,0xd6990624ul,0xf40e3585ul,0x106aa070ul,
+    0x19a4c116ul,0x1e376c08ul,0x2748774cul,0x34b0bcb5ul,
+    0x391c0cb3ul,0x4ed8aa4aul,0x5b9cca4ful,0x682e6ff3ul,
+    0x748f82eeul,0x78a5636ful,0x84c87814ul,0x8cc70208ul,
+    0x90befffaul,0xa4506cebul,0xbef9a3f7ul,0xc67178f2ul
+};
+
+// Inline rotate right
+__device__ __forceinline__ uint32_t rotr(uint32_t x, int n) {
     return (x >> n) | (x << (32 - n));
 }
 
+// Inline SHA-256 functions
+__device__ __forceinline__ uint32_t Ch(uint32_t x, uint32_t y, uint32_t z) {
+    return (x & y) ^ (~x & z);
+}
+
+__device__ __forceinline__ uint32_t Maj(uint32_t x, uint32_t y, uint32_t z) {
+    return (x & y) ^ (x & z) ^ (y & z);
+}
+
+__device__ __forceinline__ uint32_t Sigma0(uint32_t x) {
+    return rotr(x, 2) ^ rotr(x, 13) ^ rotr(x, 22);
+}
+
+__device__ __forceinline__ uint32_t Sigma1(uint32_t x) {
+    return rotr(x, 6) ^ rotr(x, 11) ^ rotr(x, 25);
+}
+
+__device__ __forceinline__ uint32_t sigma0(uint32_t x) {
+    return rotr(x, 7) ^ rotr(x, 18) ^ (x >> 3);
+}
+
+__device__ __forceinline__ uint32_t sigma1(uint32_t x) {
+    return rotr(x, 17) ^ rotr(x, 19) ^ (x >> 10);
+}
+
 __device__ void sha256(const uint8_t* data, int len, uint8_t hash[32]) {
-    const uint32_t K[] = {
-        0x428a2f98ul,0x71374491ul,0xb5c0fbcful,0xe9b5dba5ul,
-        0x3956c25bul,0x59f111f1ul,0x923f82a4ul,0xab1c5ed5ul,
-        0xd807aa98ul,0x12835b01ul,0x243185beul,0x550c7dc3ul,
-        0x72be5d74ul,0x80deb1feul,0x9bdc06a7ul,0xc19bf174ul,
-        0xe49b69c1ul,0xefbe4786ul,0x0fc19dc6ul,0x240ca1ccul,
-        0x2de92c6ful,0x4a7484aaul,0x5cb0a9dcul,0x76f988daul,
-        0x983e5152ul,0xa831c66dul,0xb00327c8ul,0xbf597fc7ul,
-        0xc6e00bf3ul,0xd5a79147ul,0x06ca6351ul,0x14292967ul,
-        0x27b70a85ul,0x2e1b2138ul,0x4d2c6dfcul,0x53380d13ul,
-        0x650a7354ul,0x766a0abbul,0x81c2c92eul,0x92722c85ul,
-        0xa2bfe8a1ul,0xa81a664bul,0xc24b8b70ul,0xc76c51a3ul,
-        0xd192e819ul,0xd6990624ul,0xf40e3585ul,0x106aa070ul,
-        0x19a4c116ul,0x1e376c08ul,0x2748774cul,0x34b0bcb5ul,
-        0x391c0cb3ul,0x4ed8aa4aul,0x5b9cca4ful,0x682e6ff3ul,
-        0x748f82eeul,0x78a5636ful,0x84c87814ul,0x8cc70208ul,
-        0x90befffaul,0xa4506cebul,0xbef9a3f7ul,0xc67178f2ul
-    };
-
-    uint32_t h[8] = {
-        0x6a09e667ul, 0xbb67ae85ul, 0x3c6ef372ul, 0xa54ff53aul,
-        0x510e527ful, 0x9b05688cul, 0x1f83d9abul, 0x5be0cd19ul
-    };
-
+    // Initialize hash values
+    uint32_t h0 = 0x6a09e667ul;
+    uint32_t h1 = 0xbb67ae85ul;
+    uint32_t h2 = 0x3c6ef372ul;
+    uint32_t h3 = 0xa54ff53aul;
+    uint32_t h4 = 0x510e527ful;
+    uint32_t h5 = 0x9b05688cul;
+    uint32_t h6 = 0x1f83d9abul;
+    uint32_t h7 = 0x5be0cd19ul;
     
-    uint8_t full[64] = {0};
-    
-    
-    #pragma unroll
-    for (int i = 0; i < len; ++i) full[i] = data[i];
-    full[len] = 0x80;
-    
-    
-    uint64_t bit_len = (uint64_t)len * 8;
-    #pragma unroll
-    for (int i = 0; i < 8; ++i) {
-        full[63 - i] = bit_len >> (8 * i);
-    }
-
-    
+    // Message schedule array
     uint32_t w[64];
     
-    
-    #pragma unroll 16
+    // Prepare message block - load data directly into w[0..15]
+    #pragma unroll
     for (int i = 0; i < 16; ++i) {
-        w[i] = (full[4 * i] << 24) | (full[4 * i + 1] << 16) |
-               (full[4 * i + 2] << 8) | full[4 * i + 3];
+        if (i * 4 < len) {
+            // Load available bytes
+            uint32_t val = 0;
+            #pragma unroll
+            for (int j = 0; j < 4; ++j) {
+                int idx = i * 4 + j;
+                if (idx < len) {
+                    val |= ((uint32_t)data[idx]) << (24 - j * 8);
+                } else if (idx == len) {
+                    val |= 0x80u << (24 - j * 8);  // Append bit '1'
+                }
+            }
+            w[i] = val;
+        } else if (i * 4 == len) {
+            w[i] = 0x80000000u;  // Padding starts here
+        } else if (i == 14) {
+            w[i] = 0;  // Upper 32 bits of length (always 0 for len < 512MB)
+        } else if (i == 15) {
+            w[i] = (uint32_t)(len * 8);  // Lower 32 bits of bit length
+        } else {
+            w[i] = 0;
+        }
     }
     
-    
+    // Extend the first 16 words into the remaining 48 words
     #pragma unroll
     for (int i = 16; i < 64; ++i) {
-        uint32_t s0 = rotr(w[i - 15], 7) ^ rotr(w[i - 15], 18) ^ (w[i - 15] >> 3);
-        uint32_t s1 = rotr(w[i - 2], 17) ^ rotr(w[i - 2], 19) ^ (w[i - 2] >> 10);
-        w[i] = w[i - 16] + s0 + w[i - 7] + s1;
+        w[i] = sigma1(w[i - 2]) + w[i - 7] + sigma0(w[i - 15]) + w[i - 16];
     }
-
-    uint32_t a = h[0], b = h[1], c = h[2], d = h[3];
-    uint32_t e = h[4], f = h[5], g = h[6], hval = h[7];
-
     
-    #pragma unroll 8
+    // Initialize working variables
+    uint32_t a = h0, b = h1, c = h2, d = h3;
+    uint32_t e = h4, f = h5, g = h6, h = h7;
+    
+    // Main compression loop - fully unrolled
+    #pragma unroll
     for (int i = 0; i < 64; ++i) {
-        uint32_t S1 = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25);
-        uint32_t ch = (e & f) ^ ((~e) & g);
-        uint32_t temp1 = hval + S1 + ch + K[i] + w[i];
-        uint32_t S0 = rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22);
-        uint32_t maj = (a & b) ^ (a & c) ^ (b & c);
-        uint32_t temp2 = S0 + maj;
-
-        hval = g;
+        uint32_t T1 = h + Sigma1(e) + Ch(e, f, g) + c_K[i] + w[i];
+        uint32_t T2 = Sigma0(a) + Maj(a, b, c);
+        h = g;
         g = f;
         f = e;
-        e = d + temp1;
+        e = d + T1;
         d = c;
         c = b;
         b = a;
-        a = temp1 + temp2;
+        a = T1 + T2;
     }
-
-    h[0] += a; h[1] += b; h[2] += c; h[3] += d;
-    h[4] += e; h[5] += f; h[6] += g; h[7] += hval;
-
     
+    // Add compressed chunk to current hash value
+    h0 += a;
+    h1 += b;
+    h2 += c;
+    h3 += d;
+    h4 += e;
+    h5 += f;
+    h6 += g;
+    h7 += h;
+    
+    // Produce final hash (big-endian)
     #pragma unroll
-    for (int i = 0; i < 8; ++i) {
-        hash[4 * i + 0] = (h[i] >> 24) & 0xFF;
-        hash[4 * i + 1] = (h[i] >> 16) & 0xFF;
-        hash[4 * i + 2] = (h[i] >> 8) & 0xFF;
-        hash[4 * i + 3] = (h[i] >> 0) & 0xFF;
+    for (int i = 0; i < 4; ++i) {
+        hash[i]      = (h0 >> (24 - i * 8)) & 0xFF;
+        hash[i + 4]  = (h1 >> (24 - i * 8)) & 0xFF;
+        hash[i + 8]  = (h2 >> (24 - i * 8)) & 0xFF;
+        hash[i + 12] = (h3 >> (24 - i * 8)) & 0xFF;
+        hash[i + 16] = (h4 >> (24 - i * 8)) & 0xFF;
+        hash[i + 20] = (h5 >> (24 - i * 8)) & 0xFF;
+        hash[i + 24] = (h6 >> (24 - i * 8)) & 0xFF;
+        hash[i + 28] = (h7 >> (24 - i * 8)) & 0xFF;
     }
 }
 
+// Optimized RIPEMD-160 implementation for CUDA
+
+// Use constant memory for lookup tables (cached and broadcast efficiently)
+__constant__ uint32_t c_K1[5] = {0x00000000, 0x5A827999, 0x6ED9EBA1, 0x8F1BBCDC, 0xA953FD4E};
+__constant__ uint32_t c_K2[5] = {0x50A28BE6, 0x5C4DD124, 0x6D703EF3, 0x7A6D76E9, 0x00000000};
+
+__constant__ int c_ZL[80] = {
+    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+    7, 4, 13, 1, 10, 6, 15, 3, 12, 0, 9, 5, 2, 14, 11, 8,
+    3, 10, 14, 4, 9, 15, 8, 1, 2, 7, 0, 6, 13, 11, 5, 12,
+    1, 9, 11, 10, 0, 8, 12, 4, 13, 3, 7, 15, 14, 5, 6, 2,
+    4, 0, 5, 9, 7, 12, 2, 10, 14, 1, 3, 8, 11, 6, 15, 13
+};
+
+__constant__ int c_ZR[80] = {
+    5, 14, 7, 0, 9, 2, 11, 4, 13, 6, 15, 8, 1, 10, 3, 12,
+    6, 11, 3, 7, 0, 13, 5, 10, 14, 15, 8, 12, 4, 9, 1, 2,
+    15, 5, 1, 3, 7, 14, 6, 9, 11, 8, 12, 2, 10, 0, 4, 13,
+    8, 6, 4, 1, 3, 11, 15, 0, 5, 12, 2, 13, 9, 7, 10, 14,
+    12, 15, 10, 4, 1, 5, 8, 7, 6, 2, 13, 14, 0, 3, 9, 11
+};
+
+__constant__ int c_SL[80] = {
+    11, 14, 15, 12, 5, 8, 7, 9, 11, 13, 14, 15, 6, 7, 9, 8,
+    7, 6, 8, 13, 11, 9, 7, 15, 7, 12, 15, 9, 11, 7, 13, 12,
+    11, 13, 6, 7, 14, 9, 13, 15, 14, 8, 13, 6, 5, 12, 7, 5,
+    11, 12, 14, 15, 14, 15, 9, 8, 9, 14, 5, 6, 8, 6, 5, 12,
+    9, 15, 5, 11, 6, 8, 13, 12, 5, 12, 13, 14, 11, 8, 5, 6
+};
+
+__constant__ int c_SR[80] = {
+    8, 9, 9, 11, 13, 15, 15, 5, 7, 7, 8, 11, 14, 14, 12, 6,
+    9, 13, 15, 7, 12, 8, 9, 11, 7, 7, 12, 7, 6, 15, 13, 11,
+    9, 7, 15, 11, 8, 6, 6, 14, 12, 13, 5, 14, 13, 13, 7, 5,
+    15, 5, 8, 11, 14, 14, 6, 14, 6, 9, 12, 9, 12, 5, 15, 8,
+    8, 5, 12, 9, 12, 5, 14, 6, 8, 13, 6, 5, 15, 13, 11, 11
+};
+
+// Inline device functions for F operations
+__device__ __forceinline__ uint32_t F(uint32_t x, uint32_t y, uint32_t z) {
+    return x ^ y ^ z;
+}
+
+__device__ __forceinline__ uint32_t G(uint32_t x, uint32_t y, uint32_t z) {
+    return (x & y) | (~x & z);
+}
+
+__device__ __forceinline__ uint32_t H(uint32_t x, uint32_t y, uint32_t z) {
+    return (x | ~y) ^ z;
+}
+
+__device__ __forceinline__ uint32_t I(uint32_t x, uint32_t y, uint32_t z) {
+    return (x & z) | (y & ~z);
+}
+
+__device__ __forceinline__ uint32_t J(uint32_t x, uint32_t y, uint32_t z) {
+    return x ^ (y | ~z);
+}
+
+__device__ __forceinline__ uint32_t ROL(uint32_t x, int n) {
+    return (x << n) | (x >> (32 - n));
+}
+
+// Macro to reduce code repetition
+#define ROUND(a, b, c, d, e, func, x, s, k) \
+    do { \
+        uint32_t t = a + func(b, c, d) + x + k; \
+        t = ROL(t, s) + e; \
+        a = e; \
+        e = d; \
+        d = ROL(c, 10); \
+        c = b; \
+        b = t; \
+    } while(0)
+
 __device__ void ripemd160(const uint8_t* msg, uint8_t* out) {
-    
-    const uint32_t K1[5] = {0x00000000, 0x5A827999, 0x6ED9EBA1, 0x8F1BBCDC, 0xA953FD4E};
-    const uint32_t K2[5] = {0x50A28BE6, 0x5C4DD124, 0x6D703EF3, 0x7A6D76E9, 0x00000000};
-    
-    
-    const int ZL[80] = {
-        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
-        7, 4, 13, 1, 10, 6, 15, 3, 12, 0, 9, 5, 2, 14, 11, 8,
-        3, 10, 14, 4, 9, 15, 8, 1, 2, 7, 0, 6, 13, 11, 5, 12,
-        1, 9, 11, 10, 0, 8, 12, 4, 13, 3, 7, 15, 14, 5, 6, 2,
-        4, 0, 5, 9, 7, 12, 2, 10, 14, 1, 3, 8, 11, 6, 15, 13
-    };
-    
-    const int ZR[80] = {
-        5, 14, 7, 0, 9, 2, 11, 4, 13, 6, 15, 8, 1, 10, 3, 12,
-        6, 11, 3, 7, 0, 13, 5, 10, 14, 15, 8, 12, 4, 9, 1, 2,
-        15, 5, 1, 3, 7, 14, 6, 9, 11, 8, 12, 2, 10, 0, 4, 13,
-        8, 6, 4, 1, 3, 11, 15, 0, 5, 12, 2, 13, 9, 7, 10, 14,
-        12, 15, 10, 4, 1, 5, 8, 7, 6, 2, 13, 14, 0, 3, 9, 11
-    };
-    
-    
-    const int SL[80] = {
-        11, 14, 15, 12, 5, 8, 7, 9, 11, 13, 14, 15, 6, 7, 9, 8,
-        7, 6, 8, 13, 11, 9, 7, 15, 7, 12, 15, 9, 11, 7, 13, 12,
-        11, 13, 6, 7, 14, 9, 13, 15, 14, 8, 13, 6, 5, 12, 7, 5,
-        11, 12, 14, 15, 14, 15, 9, 8, 9, 14, 5, 6, 8, 6, 5, 12,
-        9, 15, 5, 11, 6, 8, 13, 12, 5, 12, 13, 14, 11, 8, 5, 6
-    };
-    
-    const int SR[80] = {
-        8, 9, 9, 11, 13, 15, 15, 5, 7, 7, 8, 11, 14, 14, 12, 6,
-        9, 13, 15, 7, 12, 8, 9, 11, 7, 7, 12, 7, 6, 15, 13, 11,
-        9, 7, 15, 11, 8, 6, 6, 14, 12, 13, 5, 14, 13, 13, 7, 5,
-        15, 5, 8, 11, 14, 14, 6, 14, 6, 9, 12, 9, 12, 5, 15, 8,
-        8, 5, 12, 9, 12, 5, 14, 6, 8, 13, 6, 5, 15, 13, 11, 11
-    };
-    
-    
+    // Initialize hash values
     uint32_t h0 = 0x67452301;
     uint32_t h1 = 0xEFCDAB89;
     uint32_t h2 = 0x98BADCFE;
     uint32_t h3 = 0x10325476;
     uint32_t h4 = 0xC3D2E1F0;
     
+    // Prepare message block (32 bytes + padding)
+    uint32_t X[16];
     
-    uint8_t buffer[64];
-    #pragma unroll
-    for (int i = 0; i < 32; i++) {
-        buffer[i] = msg[i];
-    }
-    
-    
-    buffer[32] = 0x80;
-    #pragma unroll
-    for (int i = 33; i < 56; i++) {
-        buffer[i] = 0x00;
-    }
-    
-    
-    uint64_t bitlen = 256;
+    // Load message with coalesced memory access pattern
     #pragma unroll
     for (int i = 0; i < 8; i++) {
-        buffer[56 + i] = (bitlen >> (i * 8)) & 0xFF;
+        X[i] = ((uint32_t)msg[i*4]) | 
+               ((uint32_t)msg[i*4 + 1] << 8) | 
+               ((uint32_t)msg[i*4 + 2] << 16) | 
+               ((uint32_t)msg[i*4 + 3] << 24);
     }
     
+    // Padding
+    X[8] = 0x00000080;  // Append bit '1' and zeros
+    X[9] = 0;
+    X[10] = 0;
+    X[11] = 0;
+    X[12] = 0;
+    X[13] = 0;
+    X[14] = 256;  // Length in bits (32 bytes = 256 bits)
+    X[15] = 0;
     
-    uint32_t X[16];
-    #pragma unroll
-    for (int i = 0; i < 16; i++) {
-        X[i] = ((uint32_t)buffer[i*4]) | 
-               ((uint32_t)buffer[i*4 + 1] << 8) | 
-               ((uint32_t)buffer[i*4 + 2] << 16) | 
-               ((uint32_t)buffer[i*4 + 3] << 24);
-    }
-    
-    
+    // Working variables
     uint32_t AL = h0, BL = h1, CL = h2, DL = h3, EL = h4;
     uint32_t AR = h0, BR = h1, CR = h2, DR = h3, ER = h4;
     
-    
-    #pragma unroll 10
-    for (int j = 0; j < 80; j++) {
-        uint32_t T;
-        
-        
-        if (j < 16) {
-            T = AL + (BL ^ CL ^ DL) + X[ZL[j]] + K1[0];
-        } else if (j < 32) {
-            T = AL + ((BL & CL) | (~BL & DL)) + X[ZL[j]] + K1[1];
-        } else if (j < 48) {
-            T = AL + ((BL | ~CL) ^ DL) + X[ZL[j]] + K1[2];
-        } else if (j < 64) {
-            T = AL + ((BL & DL) | (CL & ~DL)) + X[ZL[j]] + K1[3];
-        } else {
-            T = AL + (BL ^ (CL | ~DL)) + X[ZL[j]] + K1[4];
-        }
-        T = ((T << SL[j]) | (T >> (32 - SL[j]))) + EL;
-        AL = EL; EL = DL; DL = (CL << 10) | (CL >> 22); CL = BL; BL = T;
-        
-        
-        if (j < 16) {
-            T = AR + (BR ^ (CR | ~DR)) + X[ZR[j]] + K2[0];
-        } else if (j < 32) {
-            T = AR + ((BR & DR) | (CR & ~DR)) + X[ZR[j]] + K2[1];
-        } else if (j < 48) {
-            T = AR + ((BR | ~CR) ^ DR) + X[ZR[j]] + K2[2];
-        } else if (j < 64) {
-            T = AR + ((BR & CR) | (~BR & DR)) + X[ZR[j]] + K2[3];
-        } else {
-            T = AR + (BR ^ CR ^ DR) + X[ZR[j]] + K2[4];
-        }
-        T = ((T << SR[j]) | (T >> (32 - SR[j]))) + ER;
-        AR = ER; ER = DR; DR = (CR << 10) | (CR >> 22); CR = BR; BR = T;
+    // Main rounds - fully unrolled to eliminate branching
+    // Left rounds (0-15) - F function
+    #pragma unroll
+    for (int j = 0; j < 16; j++) {
+        ROUND(AL, BL, CL, DL, EL, F, X[c_ZL[j]], c_SL[j], c_K1[0]);
     }
     
+    // Left rounds (16-31) - G function
+    #pragma unroll
+    for (int j = 16; j < 32; j++) {
+        ROUND(AL, BL, CL, DL, EL, G, X[c_ZL[j]], c_SL[j], c_K1[1]);
+    }
     
+    // Left rounds (32-47) - H function
+    #pragma unroll
+    for (int j = 32; j < 48; j++) {
+        ROUND(AL, BL, CL, DL, EL, H, X[c_ZL[j]], c_SL[j], c_K1[2]);
+    }
+    
+    // Left rounds (48-63) - I function
+    #pragma unroll
+    for (int j = 48; j < 64; j++) {
+        ROUND(AL, BL, CL, DL, EL, I, X[c_ZL[j]], c_SL[j], c_K1[3]);
+    }
+    
+    // Left rounds (64-79) - J function
+    #pragma unroll
+    for (int j = 64; j < 80; j++) {
+        ROUND(AL, BL, CL, DL, EL, J, X[c_ZL[j]], c_SL[j], c_K1[4]);
+    }
+    
+    // Right rounds (0-15) - J function (reversed)
+    #pragma unroll
+    for (int j = 0; j < 16; j++) {
+        ROUND(AR, BR, CR, DR, ER, J, X[c_ZR[j]], c_SR[j], c_K2[0]);
+    }
+    
+    // Right rounds (16-31) - I function (reversed)
+    #pragma unroll
+    for (int j = 16; j < 32; j++) {
+        ROUND(AR, BR, CR, DR, ER, I, X[c_ZR[j]], c_SR[j], c_K2[1]);
+    }
+    
+    // Right rounds (32-47) - H function (reversed)
+    #pragma unroll
+    for (int j = 32; j < 48; j++) {
+        ROUND(AR, BR, CR, DR, ER, H, X[c_ZR[j]], c_SR[j], c_K2[2]);
+    }
+    
+    // Right rounds (48-63) - G function (reversed)
+    #pragma unroll
+    for (int j = 48; j < 64; j++) {
+        ROUND(AR, BR, CR, DR, ER, G, X[c_ZR[j]], c_SR[j], c_K2[3]);
+    }
+    
+    // Right rounds (64-79) - F function (reversed)
+    #pragma unroll
+    for (int j = 64; j < 80; j++) {
+        ROUND(AR, BR, CR, DR, ER, F, X[c_ZR[j]], c_SR[j], c_K2[4]);
+    }
+    
+    // Finalization
     uint32_t T = h1 + CL + DR;
     h1 = h2 + DL + ER;
     h2 = h3 + EL + AR;
@@ -980,7 +1076,7 @@ __device__ void ripemd160(const uint8_t* msg, uint8_t* out) {
     h4 = h0 + BL + CR;
     h0 = T;
     
-    
+    // Write output - preserve little-endian byte order
     #pragma unroll
     for (int i = 0; i < 4; i++) {
         out[i]      = (h0 >> (i * 8)) & 0xFF;
@@ -990,7 +1086,6 @@ __device__ void ripemd160(const uint8_t* msg, uint8_t* out) {
         out[i + 16] = (h4 >> (i * 8)) & 0xFF;
     }
 }
-
 __device__ __forceinline__ void hash160(const uint8_t* data, int len, uint8_t out[20]) {
     uint8_t sha[32];
     sha256(data, len, sha);
@@ -1034,7 +1129,15 @@ __device__ void jacobian_to_hash160_direct(const ECPointJac *P, uint8_t hash160_
     }
 
     
-    hash160(pubkey, 33, hash160_out);
+    // Do:
+    uint8_t full_hash[20];
+    hash160(pubkey, 33, full_hash);
+    
+    // Copy only first 10 bytes
+    #pragma unroll
+    for (int i = 0; i < 10; i++) {
+        hash160_out[i] = full_hash[i];
+    }
 }
 
 __device__ void jacobian_to_affine(ECPoint *R, const ECPointJac *P) {
@@ -1090,6 +1193,7 @@ __device__ __forceinline__ void scalar_multiply_multi_base_jac(ECPointJac *resul
         }
     }
 }
+
 __device__ void jacobian_batch_to_hash160(const ECPointJac points[BATCH_SIZE], uint8_t hash160_out[BATCH_SIZE][20]) {
     
     
@@ -1198,7 +1302,9 @@ __device__ void jacobian_batch_to_hash160(const ECPointJac points[BATCH_SIZE], u
         }
         
         
-        hash160(pubkey, 33, hash160_out[orig_idx]);
+		uint8_t hash_buffer[20];
+		hash160(pubkey, 33, hash_buffer);
+		memcpy(hash160_out[orig_idx], hash_buffer, 20);
     }
 }
 
