@@ -39,19 +39,19 @@ __device__ ECPointJac G_base_precomp[NUM_BASE_POINTS][1 << WINDOW_SIZE];
 
 __host__ __device__ __forceinline__ void init_bigint(BigInt *x, uint32_t val) {
     x->data[0] = val;
-	#pragma unroll
+	
     for (int i = 1; i < BIGINT_WORDS; i++) x->data[i] = 0;
 }
 
 __host__ __device__ __forceinline__ void copy_bigint(BigInt *dest, const BigInt *src) {
-	#pragma unroll
+	
     for (int i = 0; i < BIGINT_WORDS; i++) {
         dest->data[i] = src->data[i];
     }
 }
 
 __host__ __device__ __forceinline__ int compare_bigint(const BigInt *a, const BigInt *b) {
-	#pragma unroll
+	
     for (int i = BIGINT_WORDS - 1; i >= 0; i--) {
         if (a->data[i] > b->data[i]) return 1;
         if (a->data[i] < b->data[i]) return -1;
@@ -60,7 +60,7 @@ __host__ __device__ __forceinline__ int compare_bigint(const BigInt *a, const Bi
 }
 
 __host__ __device__ __forceinline__ bool is_zero(const BigInt *a) {
-	#pragma unroll
+	
     for (int i = 0; i < BIGINT_WORDS; i++) {
         if (a->data[i]) return false;
     }
@@ -195,7 +195,7 @@ __device__ __forceinline__ void bigint_sub_nored(BigInt *r, const BigInt *a, con
 
 __device__ __forceinline__ bool bigint_is_one(const BigInt *a) {
     if (a->data[0] != 1u) return false;
-    #pragma unroll
+    
     for (int i = 1; i < BIGINT_WORDS; ++i) {
         if (a->data[i] != 0u) return false;
     }
@@ -211,7 +211,7 @@ __device__ __forceinline__ void reduce_mod_p(BigInt *x) {
 
 __device__ __forceinline__ void multiply_bigint_by_const(const BigInt *a, uint32_t c, uint32_t result[9]) {
     uint32_t carry = 0;
-    #pragma unroll
+    
     for (int i = 0; i < BIGINT_WORDS; i++) {
         uint32_t lo, hi;
         asm volatile(
@@ -232,7 +232,7 @@ __device__ __forceinline__ void multiply_bigint_by_const(const BigInt *a, uint32
 __device__ __forceinline__ void shift_left_word(const BigInt *a, uint32_t result[9]) {
     result[0] = 0;
     
-    #pragma unroll
+    
     for (int i = 0; i < BIGINT_WORDS; i++) {
         result[i+1] = a->data[i];
     }
@@ -261,7 +261,7 @@ __device__ __forceinline__ void add_9word(uint32_t r[9], const uint32_t addend[9
 
 __device__ __forceinline__ void convert_9word_to_bigint(const uint32_t r[9], BigInt *res) {
 
-	#pragma unroll
+	
     for (int i = 0; i < BIGINT_WORDS; i++) {
         res->data[i] = r[i];
     }
@@ -270,7 +270,7 @@ __device__ __forceinline__ void convert_9word_to_bigint(const uint32_t r[9], Big
 __device__ __forceinline__ void add_9word_with_carry(uint32_t r[9], const uint32_t addend[9]) {
     
     uint32_t carry = 0;
-    #pragma unroll
+    
     for (int i = 0; i < 9; i++) {
         uint32_t sum = r[i] + addend[i] + carry;
         carry = (sum < r[i]) | ((sum == r[i]) & addend[i]) | 
@@ -286,11 +286,11 @@ __device__ __forceinline__ void mul_mod_device(BigInt *res, const BigInt *a, con
     uint32_t product[16] = {0};
     
     
-    #pragma unroll
+    
     for (int i = 0; i < BIGINT_WORDS; i++) {
         uint64_t carry = 0;
         
-        #pragma unroll
+        
         for (int j = 0; j < BIGINT_WORDS; j++) {
             
             uint64_t mul = (uint64_t)a->data[i] * (uint64_t)b->data[j];
@@ -310,7 +310,7 @@ __device__ __forceinline__ void mul_mod_device(BigInt *res, const BigInt *a, con
     
     
     uint32_t result[9] = {0};  
-    #pragma unroll
+    
     for (int i = 0; i < BIGINT_WORDS; i++) {
         result[i] = product[i];
     }
@@ -318,7 +318,7 @@ __device__ __forceinline__ void mul_mod_device(BigInt *res, const BigInt *a, con
     
     
     uint64_t c = 0;
-    #pragma unroll
+    
     for (int i = 0; i < BIGINT_WORDS; i++) {
         
         uint32_t lo977, hi977;
@@ -340,7 +340,7 @@ __device__ __forceinline__ void mul_mod_device(BigInt *res, const BigInt *a, con
     
     
     c = 0;
-    #pragma unroll
+    
     for (int i = 0; i < BIGINT_WORDS; i++) {
         uint64_t sum = (uint64_t)result[i + 1] + (uint64_t)product[8 + i] + c;
         result[i + 1] = (uint32_t)sum;
@@ -388,7 +388,7 @@ __device__ __forceinline__ void mul_mod_device(BigInt *res, const BigInt *a, con
     }
     
     
-    #pragma unroll
+    
     for (int i = 0; i < BIGINT_WORDS; i++) {
         res->data[i] = result[i];
     }
@@ -455,7 +455,7 @@ __device__ void modexp(BigInt *res, const BigInt *base, const BigInt *exp) {
     
     
     uint32_t exp_words[BIGINT_WORDS];
-    #pragma unroll
+    
     for (int i = 0; i < BIGINT_WORDS; i++) {
         exp_words[i] = exp->data[i];
     }
@@ -559,7 +559,7 @@ __device__ void modexp(BigInt *res, const BigInt *base, const BigInt *exp) {
                     break;
                 default:
                     
-                    #pragma unroll 4
+                    
                     for (int j = 0; j < window_len; j++) {
                         mul_mod_device(&result, &result, &result);
                     }
@@ -823,12 +823,12 @@ __device__ void sha256(const uint8_t* data, int len, uint8_t hash[32]) {
     uint32_t w[64];
     
     // Prepare message block - load data directly into w[0..15]
-    #pragma unroll
+    
     for (int i = 0; i < 16; ++i) {
         if (i * 4 < len) {
             // Load available bytes
             uint32_t val = 0;
-            #pragma unroll
+            
             for (int j = 0; j < 4; ++j) {
                 int idx = i * 4 + j;
                 if (idx < len) {
@@ -850,7 +850,7 @@ __device__ void sha256(const uint8_t* data, int len, uint8_t hash[32]) {
     }
     
     // Extend the first 16 words into the remaining 48 words
-    #pragma unroll
+    
     for (int i = 16; i < 64; ++i) {
         w[i] = sigma1(w[i - 2]) + w[i - 7] + sigma0(w[i - 15]) + w[i - 16];
     }
@@ -860,7 +860,7 @@ __device__ void sha256(const uint8_t* data, int len, uint8_t hash[32]) {
     uint32_t e = h4, f = h5, g = h6, h = h7;
     
     // Main compression loop - fully unrolled
-    #pragma unroll
+    
     for (int i = 0; i < 64; ++i) {
         uint32_t T1 = h + Sigma1(e) + Ch(e, f, g) + c_K[i] + w[i];
         uint32_t T2 = Sigma0(a) + Maj(a, b, c);
@@ -885,7 +885,7 @@ __device__ void sha256(const uint8_t* data, int len, uint8_t hash[32]) {
     h7 += h;
     
     // Produce final hash (big-endian)
-    #pragma unroll
+    
     for (int i = 0; i < 4; ++i) {
         hash[i]      = (h0 >> (24 - i * 8)) & 0xFF;
         hash[i + 4]  = (h1 >> (24 - i * 8)) & 0xFF;
@@ -985,7 +985,7 @@ __device__ void ripemd160(const uint8_t* msg, uint8_t* out) {
     uint32_t X[16];
     
     // Load message with coalesced memory access pattern
-    #pragma unroll
+    
     for (int i = 0; i < 8; i++) {
         X[i] = ((uint32_t)msg[i*4]) | 
                ((uint32_t)msg[i*4 + 1] << 8) | 
@@ -1009,61 +1009,61 @@ __device__ void ripemd160(const uint8_t* msg, uint8_t* out) {
     
     // Main rounds - fully unrolled to eliminate branching
     // Left rounds (0-15) - F function
-    #pragma unroll
+    
     for (int j = 0; j < 16; j++) {
         ROUND(AL, BL, CL, DL, EL, F, X[c_ZL[j]], c_SL[j], c_K1[0]);
     }
     
     // Left rounds (16-31) - G function
-    #pragma unroll
+    
     for (int j = 16; j < 32; j++) {
         ROUND(AL, BL, CL, DL, EL, G, X[c_ZL[j]], c_SL[j], c_K1[1]);
     }
     
     // Left rounds (32-47) - H function
-    #pragma unroll
+    
     for (int j = 32; j < 48; j++) {
         ROUND(AL, BL, CL, DL, EL, H, X[c_ZL[j]], c_SL[j], c_K1[2]);
     }
     
     // Left rounds (48-63) - I function
-    #pragma unroll
+    
     for (int j = 48; j < 64; j++) {
         ROUND(AL, BL, CL, DL, EL, I, X[c_ZL[j]], c_SL[j], c_K1[3]);
     }
     
     // Left rounds (64-79) - J function
-    #pragma unroll
+    
     for (int j = 64; j < 80; j++) {
         ROUND(AL, BL, CL, DL, EL, J, X[c_ZL[j]], c_SL[j], c_K1[4]);
     }
     
     // Right rounds (0-15) - J function (reversed)
-    #pragma unroll
+    
     for (int j = 0; j < 16; j++) {
         ROUND(AR, BR, CR, DR, ER, J, X[c_ZR[j]], c_SR[j], c_K2[0]);
     }
     
     // Right rounds (16-31) - I function (reversed)
-    #pragma unroll
+    
     for (int j = 16; j < 32; j++) {
         ROUND(AR, BR, CR, DR, ER, I, X[c_ZR[j]], c_SR[j], c_K2[1]);
     }
     
     // Right rounds (32-47) - H function (reversed)
-    #pragma unroll
+    
     for (int j = 32; j < 48; j++) {
         ROUND(AR, BR, CR, DR, ER, H, X[c_ZR[j]], c_SR[j], c_K2[2]);
     }
     
     // Right rounds (48-63) - G function (reversed)
-    #pragma unroll
+    
     for (int j = 48; j < 64; j++) {
         ROUND(AR, BR, CR, DR, ER, G, X[c_ZR[j]], c_SR[j], c_K2[3]);
     }
     
     // Right rounds (64-79) - F function (reversed)
-    #pragma unroll
+    
     for (int j = 64; j < 80; j++) {
         ROUND(AR, BR, CR, DR, ER, F, X[c_ZR[j]], c_SR[j], c_K2[4]);
     }
@@ -1077,7 +1077,7 @@ __device__ void ripemd160(const uint8_t* msg, uint8_t* out) {
     h0 = T;
     
     // Write output - preserve little-endian byte order
-    #pragma unroll
+    
     for (int i = 0; i < 4; i++) {
         out[i]      = (h0 >> (i * 8)) & 0xFF;
         out[i + 4]  = (h1 >> (i * 8)) & 0xFF;
@@ -1119,7 +1119,7 @@ __device__ void jacobian_to_hash160_direct(const ECPointJac *P, uint8_t hash160_
     pubkey[0] = 0x02 + (y_affine.data[0] & 1);
 
     
-    #pragma unroll
+    
     for (int i = 0; i < 8; i++) {
         uint32_t word = x_affine.data[7 - i];
         pubkey[1 + i*4 + 0] = (word >> 24) & 0xFF;
@@ -1134,7 +1134,7 @@ __device__ void jacobian_to_hash160_direct(const ECPointJac *P, uint8_t hash160_
     hash160(pubkey, 33, full_hash);
     
     // Copy only first 10 bytes
-    #pragma unroll
+    
     for (int i = 0; i < 10; i++) {
         hash160_out[i] = full_hash[i];
     }
@@ -1163,13 +1163,13 @@ __device__ __forceinline__ void scalar_multiply_multi_base_jac(ECPointJac *resul
     
     
     
-    #pragma unroll 4
+    
     for (int window = NUM_BASE_POINTS - 1; window >= 0; window--) {
         int bit_index = window * WINDOW_SIZE;
         
         
         uint32_t window_val = 0;
-        #pragma unroll
+        
         for (int i = 0; i < WINDOW_SIZE; i++) {
             if (get_bit(scalar, bit_index + i)) {
                 window_val |= (1U << i);
@@ -1207,11 +1207,11 @@ __device__ void jacobian_batch_to_hash160(const ECPointJac points[BATCH_SIZE], u
     uint8_t valid_count = 0;
     
     
-    #pragma unroll 8
+    
     for (int i = 0; i < BATCH_SIZE; i++) {
         
         uint32_t z_check = 0;
-        #pragma unroll
+        
         for (int j = 0; j < BIGINT_WORDS; j++) {
             z_check |= points[i].Z.data[j];
         }
@@ -1243,7 +1243,7 @@ __device__ void jacobian_batch_to_hash160(const ECPointJac points[BATCH_SIZE], u
     
     copy_bigint(&products[0], &valid_points[0].Z);
     
-    #pragma unroll 8
+    
     for (int i = 1; i < valid_count; i++) {
         mul_mod_device(&products[i], &products[i-1], &valid_points[i].Z);
     }
@@ -1255,7 +1255,7 @@ __device__ void jacobian_batch_to_hash160(const ECPointJac points[BATCH_SIZE], u
     
     BigInt current_inv = inv_final;
     
-    #pragma unroll 8
+    
     for (int i = valid_count - 1; i > 0; i--) {
         
         mul_mod_device(&inverses[i], &current_inv, &products[i-1]);
@@ -1266,7 +1266,7 @@ __device__ void jacobian_batch_to_hash160(const ECPointJac points[BATCH_SIZE], u
     copy_bigint(&inverses[0], &current_inv);
     
     
-    #pragma unroll 8
+    
     for (int i = 0; i < valid_count; i++) {
         uint8_t orig_idx = valid_points[i].original_idx;
         
@@ -1291,7 +1291,7 @@ __device__ void jacobian_batch_to_hash160(const ECPointJac points[BATCH_SIZE], u
         pubkey[0] = 0x02 | (y_affine.data[0] & 1);
         
         
-        #pragma unroll
+        
         for (int j = 0; j < 8; j++) {
             uint32_t word = x_affine.data[7 - j];
             int base = 1 + (j << 2);
@@ -1308,49 +1308,85 @@ __device__ void jacobian_batch_to_hash160(const ECPointJac points[BATCH_SIZE], u
     }
 }
 
-
-__global__ void precompute_multi_base_kernel() {
+// Kernel 1: Generate base points (sequential, unavoidable)
+__global__ void generate_base_points_kernel() {
     if (threadIdx.x == 0) {
-        
         point_copy_jac(&G_base_points[0], &const_G_jacobian);
-        
         
         for (int i = 1; i < NUM_BASE_POINTS; i++) {
             point_copy_jac(&G_base_points[i], &G_base_points[i-1]);
-            
             
             for (int j = 0; j < WINDOW_SIZE; j++) {
                 double_point_jac(&G_base_points[i], &G_base_points[i]);
             }
         }
+    }
+}
+
+// Kernel 2: Build tables in parallel (one block per base point)
+__global__ void build_precomp_tables_kernel() {
+    int base_idx = blockIdx.x;
+    if (base_idx >= NUM_BASE_POINTS) return;
+    
+    if (threadIdx.x == 0) {
+        point_set_infinity_jac(&G_base_precomp[base_idx][0]);
+        point_copy_jac(&G_base_precomp[base_idx][1], &G_base_points[base_idx]);
         
-        
-        for (int base_idx = 0; base_idx < NUM_BASE_POINTS; base_idx++) {
-            
-            point_set_infinity_jac(&G_base_precomp[base_idx][0]);
-            
-            
-            point_copy_jac(&G_base_precomp[base_idx][1], &G_base_points[base_idx]);
-            
-            
-            for (int i = 2; i < (1 << WINDOW_SIZE); i++) {
-                add_point_jac(&G_base_precomp[base_idx][i], 
-                             &G_base_precomp[base_idx][i-1], 
-                             &G_base_points[base_idx]);
-            }
+        // Sequential within each block - dependencies require this
+        for (int i = 2; i < (1 << WINDOW_SIZE); i++) {
+            add_point_jac(&G_base_precomp[base_idx][i], 
+                         &G_base_precomp[base_idx][i-1], 
+                         &G_base_points[base_idx]);
         }
     }
 }
 
 
-__global__ void precompute_G_kernel() {
-    if (threadIdx.x == 0) {
+__global__ void precompute_G_kernel_parallel() {
+    const int TABLE_SIZE = 1 << WINDOW_SIZE;
+    int idx = threadIdx.x + blockIdx.x * blockDim.x;
+    
+    if (idx == 0) {
         point_set_infinity_jac(&G_precomp[0]);
-        point_copy_jac(&G_precomp[1], &const_G_jacobian);
-        for (int i = 2; i < (1 << WINDOW_SIZE); i++) {
-            add_point_jac(&G_precomp[i], &G_precomp[i-1], &const_G_jacobian);
-        }
+        return;
     }
+    
+    if (idx == 1) {
+        point_copy_jac(&G_precomp[1], &const_G_jacobian);
+        return;
+    }
+    
+    if (idx >= TABLE_SIZE) return;
+    
+    // Compute idx×G using double-and-add
+    ECPointJac result;
+    point_set_infinity_jac(&result);
+    
+    ECPointJac base;
+    point_copy_jac(&base, &const_G_jacobian);
+    
+    int n = idx;
+    while (n > 0) {
+        if (n & 1) {
+            if (result.infinity) {
+                point_copy_jac(&result, &base);
+            } else {
+                ECPointJac temp;
+                add_point_jac(&temp, &result, &base);
+                point_copy_jac(&result, &temp);
+            }
+        }
+        
+        if (n > 1) {
+            ECPointJac temp;
+            double_point_jac(&temp, &base);
+            point_copy_jac(&base, &temp);
+        }
+        
+        n >>= 1;
+    }
+    
+    point_copy_jac(&G_precomp[idx], &result);
 }
 
 
@@ -1426,7 +1462,9 @@ void init_gpu_constants() {
 
     
     printf("Precomputing G table...\n");
-    precompute_G_kernel<<<1, 1>>>();
+	int threads = 256;
+	int blocks = ((1 << WINDOW_SIZE) + threads - 1) / threads;
+	precompute_G_kernel_parallel<<<blocks, threads>>>();
     cudaError_t err = cudaDeviceSynchronize();
     if (err != cudaSuccess) {
         printf("ERROR in precompute_G_kernel: %s\n", cudaGetErrorString(err));
@@ -1435,7 +1473,11 @@ void init_gpu_constants() {
     printf("G table complete.\n");
 
     printf("Precomputing multi-base tables (this may take a moment)...\n");
-    precompute_multi_base_kernel<<<1, 1>>>();
+    generate_base_points_kernel<<<1, 1>>>();
+    cudaDeviceSynchronize();
+    
+    build_precomp_tables_kernel<<<NUM_BASE_POINTS, 1>>>();
+    cudaDeviceSynchronize();
     err = cudaDeviceSynchronize();
     if (err != cudaSuccess) {
         printf("ERROR in precompute_multi_base_kernel: %s\n", cudaGetErrorString(err));
@@ -1445,4 +1487,84 @@ void init_gpu_constants() {
     
     
     printf("Precomputation complete and verified.\n");
+}
+
+// OPTIMIZED: Specialized version for adding G (where G.Z = 1) to any point P
+__device__ __forceinline__ void add_G_to_point_jac(ECPointJac *R, const ECPointJac *P) {
+    // Since G.Z = 1, many operations simplify:
+    // Z2Z2 = 1, Z2^3 = 1
+    // U2 = G.X * Z1^2
+    // S2 = G.Y * Z1^3
+    
+    if (__builtin_expect(P->infinity, 0)) { 
+        point_copy_jac(R, &const_G_jacobian); 
+        return; 
+    }
+    
+    BigInt Z1Z1, Z1Z1Z1, U1, U2, H, S1, S2, R_big;
+    BigInt H2, H3, U1H2, R2, temp;
+    
+    // Step 1: Z1^2 (only need to compute P's Z squared)
+    mul_mod_device(&Z1Z1, &P->Z, &P->Z);
+    
+    // Step 2: U1 = P.X, U2 = G.X * Z1^2
+    copy_bigint(&U1, &P->X);
+    mul_mod_device(&U2, &const_G_jacobian.X, &Z1Z1);
+    
+    // Step 3: H = U2 - U1
+    sub_mod_device_fast(&H, &U2, &U1);
+    
+    // Fast check for point doubling (extremely rare with random points)
+    if (__builtin_expect(is_zero(&H), 0)) {
+        // Z1^3 for S comparison
+        mul_mod_device(&Z1Z1Z1, &Z1Z1, &P->Z);
+        
+        // S1 = P.Y, S2 = G.Y * Z1^3
+        copy_bigint(&S1, &P->Y);
+        mul_mod_device(&S2, &const_G_jacobian.Y, &Z1Z1Z1);
+        
+        if (compare_bigint(&S1, &S2) != 0) {
+            point_set_infinity_jac(R);
+        } else {
+            double_point_jac(R, P);
+        }
+        return;
+    }
+    
+    // Main addition case
+    // Z1^3 = Z1^2 * Z1
+    mul_mod_device(&Z1Z1Z1, &Z1Z1, &P->Z);
+    
+    // S1 = P.Y, S2 = G.Y * Z1^3
+    copy_bigint(&S1, &P->Y);
+    mul_mod_device(&S2, &const_G_jacobian.Y, &Z1Z1Z1);
+    
+    // R = S2 - S1
+    sub_mod_device_fast(&R_big, &S2, &S1);
+    
+    // H^2 and H^3
+    mul_mod_device(&H2, &H, &H);
+    mul_mod_device(&H3, &H2, &H);
+    
+    // U1*H^2
+    mul_mod_device(&U1H2, &U1, &H2);
+    
+    // R^2
+    mul_mod_device(&R2, &R_big, &R_big);
+    
+    // X3 = R^2 - H^3 - 2*U1*H^2
+    sub_mod_device_fast(&R->X, &R2, &H3);
+    sub_mod_device_fast(&R->X, &R->X, &U1H2);
+    sub_mod_device_fast(&R->X, &R->X, &U1H2);
+    
+    // Y3 = R*(U1*H^2 - X3) - S1*H^3
+    sub_mod_device_fast(&temp, &U1H2, &R->X);
+    mul_mod_device(&temp, &R_big, &temp);
+    mul_mod_device(&S1, &S1, &H3);
+    sub_mod_device_fast(&R->Y, &temp, &S1);
+    
+    // Z3 = Z1*H (since G.Z = 1)
+    mul_mod_device(&R->Z, &P->Z, &H);
+    
+    R->infinity = false;
 }
