@@ -1,4 +1,3 @@
-
 #include <iostream>
 #include <cuda_runtime.h>
 #include <stdint.h>
@@ -6,7 +5,7 @@
 
 #define BIGINT_WORDS 8
 #define WINDOW_SIZE 18
-#define NUM_BASE_POINTS 32
+#define NUM_BASE_POINTS 16
 #define BATCH_SIZE 150
 #define MOD_EXP 5
 
@@ -1159,11 +1158,7 @@ __device__ void jacobian_to_affine(ECPoint *R, const ECPointJac *P) {
 
 __device__ __forceinline__ void scalar_multiply_multi_base_jac(ECPointJac *result, const BigInt *scalar) {
     point_set_infinity_jac(result);
-    
-    
-    
-    
-    
+
     for (int window = NUM_BASE_POINTS - 1; window >= 0; window--) {
         int bit_index = window * WINDOW_SIZE;
         
@@ -1489,82 +1484,3 @@ void init_gpu_constants() {
     printf("Precomputation complete and verified.\n");
 }
 
-
-__device__ __forceinline__ void add_G_to_point_jac(ECPointJac *R, const ECPointJac *P) {
-    
-    
-    
-    
-    
-    if (__builtin_expect(P->infinity, 0)) { 
-        point_copy_jac(R, &const_G_jacobian); 
-        return; 
-    }
-    
-    BigInt Z1Z1, Z1Z1Z1, U1, U2, H, S1, S2, R_big;
-    BigInt H2, H3, U1H2, R2, temp;
-    
-    
-    mul_mod_device(&Z1Z1, &P->Z, &P->Z);
-    
-    
-    copy_bigint(&U1, &P->X);
-    mul_mod_device(&U2, &const_G_jacobian.X, &Z1Z1);
-    
-    
-    sub_mod_device_fast(&H, &U2, &U1);
-    
-    
-    if (__builtin_expect(is_zero(&H), 0)) {
-        
-        mul_mod_device(&Z1Z1Z1, &Z1Z1, &P->Z);
-        
-        
-        copy_bigint(&S1, &P->Y);
-        mul_mod_device(&S2, &const_G_jacobian.Y, &Z1Z1Z1);
-        
-        if (compare_bigint(&S1, &S2) != 0) {
-            point_set_infinity_jac(R);
-        } else {
-            double_point_jac(R, P);
-        }
-        return;
-    }
-    
-    
-    
-    mul_mod_device(&Z1Z1Z1, &Z1Z1, &P->Z);
-    
-    
-    copy_bigint(&S1, &P->Y);
-    mul_mod_device(&S2, &const_G_jacobian.Y, &Z1Z1Z1);
-    
-    
-    sub_mod_device_fast(&R_big, &S2, &S1);
-    
-    
-    mul_mod_device(&H2, &H, &H);
-    mul_mod_device(&H3, &H2, &H);
-    
-    
-    mul_mod_device(&U1H2, &U1, &H2);
-    
-    
-    mul_mod_device(&R2, &R_big, &R_big);
-    
-    
-    sub_mod_device_fast(&R->X, &R2, &H3);
-    sub_mod_device_fast(&R->X, &R->X, &U1H2);
-    sub_mod_device_fast(&R->X, &R->X, &U1H2);
-    
-    
-    sub_mod_device_fast(&temp, &U1H2, &R->X);
-    mul_mod_device(&temp, &R_big, &temp);
-    mul_mod_device(&S1, &S1, &H3);
-    sub_mod_device_fast(&R->Y, &temp, &S1);
-    
-    
-    mul_mod_device(&R->Z, &P->Z, &H);
-    
-    R->infinity = false;
-}
