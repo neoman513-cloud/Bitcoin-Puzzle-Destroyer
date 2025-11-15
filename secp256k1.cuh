@@ -1145,115 +1145,76 @@ __device__ __forceinline__ void scalar_multiply_multi_base_jac(ECPointJac *resul
 
 __device__ void jacobian_batch_to_hash160(const ECPointJac points[BATCH_SIZE], uint8_t hash160_out[BATCH_SIZE][20]) {
     
-    
-    
-    struct CompactPoint {
-        BigInt Z;
-        uint8_t original_idx;
-    };
-    
-    CompactPoint valid_points[BATCH_SIZE];
+    uint8_t valid_map[BATCH_SIZE];
     uint8_t valid_count = 0;
     
-    
-    
+    // Clear invalid points and build valid map
+    #pragma unroll
     for (int i = 0; i < BATCH_SIZE; i++) {
+        uint32_t z_check = points[i].Z.data[0] | points[i].Z.data[1] | 
+                          points[i].Z.data[2] | points[i].Z.data[3] |
+                          points[i].Z.data[4] | points[i].Z.data[5] | 
+                          points[i].Z.data[6] | points[i].Z.data[7];
         
-        uint32_t z_check = 0;
-        
-        for (int j = 0; j < BIGINT_WORDS; j++) {
-            z_check |= points[i].Z.data[j];
-        }
-        
-        bool is_valid = (!points[i].infinity) && (z_check != 0);
+        bool is_valid = (!points[i].infinity) & (z_check != 0);
         
         if (is_valid) {
-            
-            copy_bigint(&valid_points[valid_count].Z, &points[i].Z);
-            valid_points[valid_count].original_idx = i;
-            valid_count++;
+            valid_map[valid_count++] = i;
         } else {
-            
-            uint64_t* hash_ptr = (uint64_t*)hash160_out[i];
-            hash_ptr[0] = 0;
-            hash_ptr[1] = 0;
-            ((uint32_t*)hash_ptr)[4] = 0;
+            *((uint64_t*)hash160_out[i]) = 0;
+            *((uint64_t*)(hash160_out[i] + 8)) = 0;
+            *((uint32_t*)(hash160_out[i] + 16)) = 0;
         }
     }
-    
     
     if (valid_count == 0) return;
     
-    
-    
+    // Montgomery batch inversion
     BigInt products[BATCH_SIZE];
     BigInt inverses[BATCH_SIZE];
     
-    
-    copy_bigint(&products[0], &valid_points[0].Z);
-    
+    copy_bigint(&products[0], &points[valid_map[0]].Z);
     
     for (int i = 1; i < valid_count; i++) {
-        mul_mod_device(&products[i], &products[i-1], &valid_points[i].Z);
+        mul_mod_device(&products[i], &products[i-1], &points[valid_map[i]].Z);
     }
     
-    
-    BigInt inv_final;
-    mod_inverse(&inv_final, &products[valid_count - 1]);
-    
-    
-    BigInt current_inv = inv_final;
-    
+    BigInt current_inv;
+    mod_inverse(&current_inv, &products[valid_count - 1]);
     
     for (int i = valid_count - 1; i > 0; i--) {
-        
         mul_mod_device(&inverses[i], &current_inv, &products[i-1]);
-        
-        
-        mul_mod_device(&current_inv, &current_inv, &valid_points[i].Z);
+        mul_mod_device(&current_inv, &current_inv, &points[valid_map[i]].Z);
     }
     copy_bigint(&inverses[0], &current_inv);
     
-    
-    
+    // Convert to affine and compute hash160
     for (int i = 0; i < valid_count; i++) {
-        uint8_t orig_idx = valid_points[i].original_idx;
+        uint8_t idx = valid_map[i];
         
-        
-        BigInt Zinv2;
+        BigInt Zinv2, Zinv3;
         mul_mod_device(&Zinv2, &inverses[i], &inverses[i]);
-        
-        
-        BigInt x_affine;
-        mul_mod_device(&x_affine, &points[orig_idx].X, &Zinv2);
-        
-        
-        BigInt Zinv3;
         mul_mod_device(&Zinv3, &Zinv2, &inverses[i]);
         
+        BigInt x_affine, y_affine;
+        mul_mod_device(&x_affine, &points[idx].X, &Zinv2);
+        mul_mod_device(&y_affine, &points[idx].Y, &Zinv3);
         
-        BigInt y_affine;
-        mul_mod_device(&y_affine, &points[orig_idx].Y, &Zinv3);
-        
-        
+        // Build compressed pubkey directly
         uint8_t pubkey[33];
         pubkey[0] = 0x02 | (y_affine.data[0] & 1);
         
-        
-        
+        #pragma unroll
         for (int j = 0; j < 8; j++) {
             uint32_t word = x_affine.data[7 - j];
             int base = 1 + (j << 2);
-            pubkey[base]     = (word >> 24) & 0xFF;
-            pubkey[base + 1] = (word >> 16) & 0xFF;
-            pubkey[base + 2] = (word >> 8) & 0xFF;
-            pubkey[base + 3] = word & 0xFF;
+            pubkey[base]     = word >> 24;
+            pubkey[base + 1] = word >> 16;
+            pubkey[base + 2] = word >> 8;
+            pubkey[base + 3] = word;
         }
         
-        
-		uint8_t hash_buffer[20];
-		hash160(pubkey, 33, hash_buffer);
-		memcpy(hash160_out[orig_idx], hash_buffer, 20);
+        hash160(pubkey, 33, hash160_out[idx]);
     }
 }
 
@@ -1437,4 +1398,3 @@ void init_gpu_constants() {
     
     printf("Precomputation complete and verified.\n");
 }
-
