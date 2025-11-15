@@ -242,10 +242,6 @@ __global__ void start(uint64_t seed)
 	//	hash160_to_hex(hash160_batch[0], hash160_str);
 	//	printf("Thread %d %s -> %s\n", tid, hex_key, hash160_str);
 	//}
-
-	
-	// Early exit if already found
-	if (g_found) return;
 	
 	// Unrolled comparison loop with constant memory target
 	#pragma unroll
