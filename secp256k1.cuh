@@ -192,51 +192,6 @@ __device__ __forceinline__ void bigint_sub_nored(BigInt *r, const BigInt *a, con
     ptx_u256Sub(r, a, b);
 }
 
-__device__ __forceinline__ bool bigint_is_one(const BigInt *a) {
-    if (a->data[0] != 1u) return false;
-    
-    for (int i = 1; i < BIGINT_WORDS; ++i) {
-        if (a->data[i] != 0u) return false;
-    }
-    return true;
-}
-
-__device__ __forceinline__ void reduce_mod_p(BigInt *x) {
-    if (compare_bigint(x, &const_p) >= 0) {
-        ptx_u256Sub(x, x, &const_p);
-    }
-}
-
-
-__device__ __forceinline__ void multiply_bigint_by_const(const BigInt *a, uint32_t c, uint32_t result[9]) {
-    uint32_t carry = 0;
-    
-    for (int i = 0; i < BIGINT_WORDS; i++) {
-        uint32_t lo, hi;
-        asm volatile(
-            "mul.lo.u32 %0, %2, %3;\n\t"
-            "mul.hi.u32 %1, %2, %3;\n\t"
-            "add.cc.u32 %0, %0, %4;\n\t"
-            "addc.u32 %1, %1, 0;\n\t"
-            : "=r"(lo), "=r"(hi)
-            : "r"(a->data[i]), "r"(c), "r"(carry)
-        );
-        result[i] = lo;
-        carry = hi;
-    }
-    result[8] = carry;
-}
-
-
-__device__ __forceinline__ void shift_left_word(const BigInt *a, uint32_t result[9]) {
-    result[0] = 0;
-    
-    
-    for (int i = 0; i < BIGINT_WORDS; i++) {
-        result[i+1] = a->data[i];
-    }
-}
-
 __device__ __forceinline__ void add_9word(uint32_t r[9], const uint32_t addend[9]) {
     
     asm volatile(
@@ -281,17 +236,19 @@ __device__ __forceinline__ void add_9word_with_carry(uint32_t r[9], const uint32
 
 __device__ __forceinline__ void mul_mod_device(BigInt *res, const BigInt *a, const BigInt *b) {
     
+    uint32_t product[16];
     
-    uint32_t product[16] = {0};
+    #pragma unroll
+    for (int i = 0; i < 16; i++) {
+        product[i] = 0;
+    }
     
-    
-    
+    #pragma unroll
     for (int i = 0; i < BIGINT_WORDS; i++) {
         uint64_t carry = 0;
         
-        
+        #pragma unroll
         for (int j = 0; j < BIGINT_WORDS; j++) {
-            
             uint64_t mul = (uint64_t)a->data[i] * (uint64_t)b->data[j];
             uint64_t sum = (uint64_t)product[i + j] + mul + carry;
             
@@ -302,24 +259,18 @@ __device__ __forceinline__ void mul_mod_device(BigInt *res, const BigInt *a, con
         product[i + BIGINT_WORDS] = (uint32_t)carry;
     }
     
+    uint32_t result[9];
     
-    
-    
-    
-    
-    
-    uint32_t result[9] = {0};  
-    
+    #pragma unroll
     for (int i = 0; i < BIGINT_WORDS; i++) {
         result[i] = product[i];
     }
-    
-    
+    result[8] = 0;
     
     uint64_t c = 0;
     
+    #pragma unroll
     for (int i = 0; i < BIGINT_WORDS; i++) {
-        
         uint32_t lo977, hi977;
         asm volatile(
             "mul.lo.u32 %0, %2, 977;\n\t"
@@ -328,78 +279,81 @@ __device__ __forceinline__ void mul_mod_device(BigInt *res, const BigInt *a, con
             : "r"(product[8 + i])
         );
         
-        
         uint64_t sum = (uint64_t)result[i] + (uint64_t)lo977 + c;
         result[i] = (uint32_t)sum;
         c = (sum >> 32) + hi977;
     }
     
-    
     result[8] = (uint32_t)c;
-    
     
     c = 0;
     
+    #pragma unroll
     for (int i = 0; i < BIGINT_WORDS; i++) {
         uint64_t sum = (uint64_t)result[i + 1] + (uint64_t)product[8 + i] + c;
         result[i + 1] = (uint32_t)sum;
         c = sum >> 32;
     }
     
-    
-    if (result[8] != 0) {
-        uint32_t overflow = result[8];
-        
-        
-        
-        
-        uint32_t lo977, hi977;
-        asm volatile(
-            "mul.lo.u32 %0, %2, 977;\n\t"
-            "mul.hi.u32 %1, %2, 977;\n\t"
-            : "=r"(lo977), "=r"(hi977)
-            : "r"(overflow)
-        );
-        
-        c = 0;
-        uint64_t sum = (uint64_t)result[0] + (uint64_t)lo977;
-        result[0] = (uint32_t)sum;
-        c = (sum >> 32) + hi977;
-        
-        
-        for (int i = 1; i < BIGINT_WORDS && c != 0; i++) {
-            sum = (uint64_t)result[i] + c;
-            result[i] = (uint32_t)sum;
-            c = sum >> 32;
-        }
-        
-        
-        sum = (uint64_t)result[1] + (uint64_t)overflow;
-        result[1] = (uint32_t)sum;
-        c = sum >> 32;
-        
-        
-        for (int i = 2; i < BIGINT_WORDS && c != 0; i++) {
-            sum = (uint64_t)result[i] + c;
-            result[i] = (uint32_t)sum;
-            c = sum >> 32;
-        }
+    uint32_t overflow = result[8];
+    uint32_t has_overflow = (uint32_t)(-(int32_t)(overflow != 0));
+
+    uint32_t lo977, hi977;
+    asm volatile(
+        "mul.lo.u32 %0, %2, 977;\n\t"
+        "mul.hi.u32 %1, %2, 977;\n\t"
+        : "=r"(lo977), "=r"(hi977)
+        : "r"(overflow)
+    );
+
+    lo977 &= has_overflow;
+    hi977 &= has_overflow;
+    uint32_t masked_overflow = overflow & has_overflow;
+
+    uint64_t sum0 = (uint64_t)result[0] + (uint64_t)lo977;
+    uint64_t sum1 = (uint64_t)result[1] + (uint64_t)masked_overflow + (sum0 >> 32) + hi977;
+
+    result[0] = (uint32_t)sum0;
+    result[1] = (uint32_t)sum1;
+
+    uint64_t carry = sum1 >> 32;
+    #pragma unroll
+    for (int i = 2; i < BIGINT_WORDS; i++) {
+        uint64_t sum = (uint64_t)result[i] + carry;
+        result[i] = (uint32_t)sum;
+        carry = sum >> 32;
     }
     
-    
-    
+    #pragma unroll
     for (int i = 0; i < BIGINT_WORDS; i++) {
         res->data[i] = result[i];
     }
     
+    uint32_t tmp[8];
+    asm volatile(
+        "sub.cc.u32 %0, %8, %16;\n\t"
+        "subc.cc.u32 %1, %9, %17;\n\t"
+        "subc.cc.u32 %2, %10, %18;\n\t"
+        "subc.cc.u32 %3, %11, %19;\n\t"
+        "subc.cc.u32 %4, %12, %20;\n\t"
+        "subc.cc.u32 %5, %13, %21;\n\t"
+        "subc.cc.u32 %6, %14, %22;\n\t"
+        "subc.u32 %7, %15, %23;"
+        : "=r"(tmp[0]), "=r"(tmp[1]), "=r"(tmp[2]), "=r"(tmp[3]),
+          "=r"(tmp[4]), "=r"(tmp[5]), "=r"(tmp[6]), "=r"(tmp[7])
+        : "r"(res->data[0]), "r"(res->data[1]), "r"(res->data[2]), "r"(res->data[3]),
+          "r"(res->data[4]), "r"(res->data[5]), "r"(res->data[6]), "r"(res->data[7]),
+          "r"(const_p.data[0]), "r"(const_p.data[1]), "r"(const_p.data[2]), "r"(const_p.data[3]),
+          "r"(const_p.data[4]), "r"(const_p.data[5]), "r"(const_p.data[6]), "r"(const_p.data[7])
+    );
     
-    if (compare_bigint(res, &const_p) >= 0) {
-        ptx_u256Sub(res, res, &const_p);
-        
-        
-        if (__builtin_expect(compare_bigint(res, &const_p) >= 0, 0)) {
-            ptx_u256Sub(res, res, &const_p);
-        }
+    uint32_t borrow;
+    asm volatile("subc.u32 %0, 0, 0;" : "=r"(borrow));
+    uint32_t mask = ~borrow;
+    
+    #pragma unroll
+    for (int i = 0; i < 8; i++) {
+        res->data[i] = (tmp[i] & mask) | (res->data[i] & ~mask);
     }
 }
 
