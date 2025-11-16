@@ -4,10 +4,10 @@
 #include <string.h>
 
 #define BIGINT_WORDS 8
-#define WINDOW_SIZE 18
-#define NUM_BASE_POINTS 6
+#define WINDOW_SIZE 19
+#define NUM_BASE_POINTS 5
 #define BATCH_SIZE 200
-#define MOD_EXP 4
+#define MOD_EXP 5
 
 
 struct BigInt {
