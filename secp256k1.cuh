@@ -4,8 +4,8 @@
 #include <string.h>
 
 #define BIGINT_WORDS 8
-const int64_t WINDOW_SIZE = 20;
-#define NUM_BASE_POINTS 8
+#define WINDOW_SIZE 16
+#define NUM_BASE_POINTS 16
 #define BATCH_SIZE 200
 #define MOD_EXP 5
 
