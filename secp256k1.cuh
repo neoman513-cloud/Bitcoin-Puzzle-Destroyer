@@ -833,44 +833,24 @@ __device__ __forceinline__ uint32_t ROL(uint32_t x, int n) {
         c = b; \
         b = t; \
     } while(0)
-
-__device__ void ripemd160(const uint8_t* msg, uint8_t* out) {
-    
-    uint32_t h0 = 0x67452301;
-    uint32_t h1 = 0xEFCDAB89;
-    uint32_t h2 = 0x98BADCFE;
-    uint32_t h3 = 0x10325476;
-    uint32_t h4 = 0xC3D2E1F0;
-    
-    
+__device__ void ripemd160(const uint8_t* __restrict__ msg, 
+                          uint8_t* __restrict__ out) {
+    // Vector load input
+    const uint32_t* msg32 = reinterpret_cast<const uint32_t*>(msg);
     uint32_t X[16];
     
-    
-    
+    #pragma unroll
     for (int i = 0; i < 8; i++) {
-        X[i] = ((uint32_t)msg[i*4]) | 
-               ((uint32_t)msg[i*4 + 1] << 8) | 
-               ((uint32_t)msg[i*4 + 2] << 16) | 
-               ((uint32_t)msg[i*4 + 3] << 24);
+        X[i] = msg32[i];
     }
     
+    X[8] = 0x80; X[9] = 0; X[10] = 0; X[11] = 0;
+    X[12] = 0; X[13] = 0; X[14] = 256; X[15] = 0;
     
-    X[8] = 0x00000080;  
-    X[9] = 0;
-    X[10] = 0;
-    X[11] = 0;
-    X[12] = 0;
-    X[13] = 0;
-    X[14] = 256;  
-    X[15] = 0;
-    
-    
-    uint32_t AL = h0, BL = h1, CL = h2, DL = h3, EL = h4;
-    uint32_t AR = h0, BR = h1, CR = h2, DR = h3, ER = h4;
-    
-    
-    
-    
+    uint32_t AL = 0x67452301, BL = 0xEFCDAB89, CL = 0x98BADCFE;
+    uint32_t DL = 0x10325476, EL = 0xC3D2E1F0;
+    uint32_t AR = AL, BR = BL, CR = CL, DR = DL, ER = EL;
+ 
     for (int j = 0; j < 16; j++) {
         ROUND(AL, BL, CL, DL, EL, F, X[c_ZL[j]], c_SL[j], c_K1[0]);
     }
@@ -930,22 +910,16 @@ __device__ void ripemd160(const uint8_t* msg, uint8_t* out) {
     }
     
     
-    uint32_t T = h1 + CL + DR;
-    h1 = h2 + DL + ER;
-    h2 = h3 + EL + AR;
-    h3 = h4 + AL + BR;
-    h4 = h0 + BL + CR;
-    h0 = T;
+    // Combine results
+    uint32_t T = 0xEFCDAB89 + CL + DR;
     
-    
-    
-    for (int i = 0; i < 4; i++) {
-        out[i]      = (h0 >> (i * 8)) & 0xFF;
-        out[i + 4]  = (h1 >> (i * 8)) & 0xFF;
-        out[i + 8]  = (h2 >> (i * 8)) & 0xFF;
-        out[i + 12] = (h3 >> (i * 8)) & 0xFF;
-        out[i + 16] = (h4 >> (i * 8)) & 0xFF;
-    }
+    // Vector store output
+    uint32_t* out32 = reinterpret_cast<uint32_t*>(out);
+    out32[0] = T;
+    out32[1] = 0x98BADCFE + DL + ER;
+    out32[2] = 0x10325476 + EL + AR;
+    out32[3] = 0xC3D2E1F0 + AL + BR;
+    out32[4] = 0x67452301 + BL + CR;
 }
 __device__ __forceinline__ void hash160(const uint8_t* data, int len, uint8_t out[20]) {
     uint8_t sha[32];
