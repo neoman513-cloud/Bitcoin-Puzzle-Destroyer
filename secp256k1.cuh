@@ -7,7 +7,7 @@
 #define WINDOW_SIZE 18
 #define NUM_BASE_POINTS 6
 #define BATCH_SIZE 200
-#define MOD_EXP 5
+#define MOD_EXP 4
 
 
 struct BigInt {
@@ -322,6 +322,7 @@ __device__ __forceinline__ void add_mod_device(BigInt *res, const BigInt *a, con
         ptx_u256Sub(res, res, &const_p);
     }
 }
+
 template<int WINDOW_SIZE2>
 __device__ void modexp(BigInt *res, const BigInt *base, const BigInt *exp) {
     constexpr int TABLE_SIZE = 1 << (WINDOW_SIZE2 - 1); 
@@ -558,7 +559,6 @@ __device__ void double_point_jac(ECPointJac *R, const ECPointJac *P) {
     R->infinity = false;
 }
 
-
 __device__ __forceinline__ void add_point_jac(ECPointJac *R, const ECPointJac *P, const ECPointJac *Q) {
     
     if (__builtin_expect(P->infinity, 0)) { 
@@ -570,36 +570,36 @@ __device__ __forceinline__ void add_point_jac(ECPointJac *R, const ECPointJac *P
         return; 
     }
     
-    
     union TempStorage {
         struct {
             BigInt Z1Z1, Z2Z2, U1, U2, H;
-            BigInt S1, S2, R_big, temp1, temp2;
+            BigInt S1, S2, R_big, HH, HHH;
         } vars;
-        BigInt temp_array[10]; 
+        BigInt temp_array[9];
     } temp;
     
-    
+    // Z1Z1 = Z1²
     mul_mod_device(&temp.vars.Z1Z1, &P->Z, &P->Z);
+    // Z2Z2 = Z2²
     mul_mod_device(&temp.vars.Z2Z2, &Q->Z, &Q->Z);
     
-    
+    // U1 = X1·Z2²
     mul_mod_device(&temp.vars.U1, &P->X, &temp.vars.Z2Z2);
+    // U2 = X2·Z1²
     mul_mod_device(&temp.vars.U2, &Q->X, &temp.vars.Z1Z1);
     
+    // S1 = Y1·Z2³ = Y1·Z2²·Z2
+    mul_mod_device(&temp.vars.S1, &temp.vars.Z2Z2, &Q->Z);
+    mul_mod_device(&temp.vars.S1, &P->Y, &temp.vars.S1);
     
+    // S2 = Y2·Z1³ = Y2·Z1²·Z1
+    mul_mod_device(&temp.vars.S2, &temp.vars.Z1Z1, &P->Z);
+    mul_mod_device(&temp.vars.S2, &Q->Y, &temp.vars.S2);
+    
+    // H = U2 - U1
     sub_mod_device_fast(&temp.vars.H, &temp.vars.U2, &temp.vars.U1);
     
-    
     if (__builtin_expect(is_zero(&temp.vars.H), 0)) {
-        
-        mul_mod_device(&temp.vars.temp1, &temp.vars.Z1Z1, &P->Z);  
-        mul_mod_device(&temp.vars.temp2, &temp.vars.Z2Z2, &Q->Z);  
-        
-        
-        mul_mod_device(&temp.vars.S1, &P->Y, &temp.vars.temp2);
-        mul_mod_device(&temp.vars.S2, &Q->Y, &temp.vars.temp1);
-        
         if (compare_bigint(&temp.vars.S1, &temp.vars.S2) != 0) {
             point_set_infinity_jac(R);
         } else {
@@ -608,46 +608,35 @@ __device__ __forceinline__ void add_point_jac(ECPointJac *R, const ECPointJac *P
         return;
     }
     
-    
-    
-    mul_mod_device(&temp.vars.temp1, &temp.vars.Z1Z1, &P->Z);  
-    mul_mod_device(&temp.vars.temp2, &temp.vars.Z2Z2, &Q->Z);  
-    
-    mul_mod_device(&temp.vars.S1, &P->Y, &temp.vars.temp2);
-    mul_mod_device(&temp.vars.S2, &Q->Y, &temp.vars.temp1);
-    
+    // r = S2 - S1
     sub_mod_device_fast(&temp.vars.R_big, &temp.vars.S2, &temp.vars.S1);
     
+    // HH = H²
+    mul_mod_device(&temp.vars.HH, &temp.vars.H, &temp.vars.H);
+    // HHH = H³
+    mul_mod_device(&temp.vars.HHH, &temp.vars.HH, &temp.vars.H);
     
-    mul_mod_device(&temp.vars.Z1Z1, &temp.vars.H, &temp.vars.H);      
-    mul_mod_device(&temp.vars.Z2Z2, &temp.vars.Z1Z1, &temp.vars.H);   
+    // V = U1·HH (reuse U2 for V)
+    mul_mod_device(&temp.vars.U2, &temp.vars.U1, &temp.vars.HH);
     
+    // X3 = r² - HHH - 2V
+    mul_mod_device(&R->X, &temp.vars.R_big, &temp.vars.R_big);
+    sub_mod_device_fast(&R->X, &R->X, &temp.vars.HHH);
+    sub_mod_device_fast(&R->X, &R->X, &temp.vars.U2);
+    sub_mod_device_fast(&R->X, &R->X, &temp.vars.U2);
     
-    mul_mod_device(&temp.vars.temp1, &temp.vars.U1, &temp.vars.Z1Z1);  
+    // Y3 = r·(V - X3) - S1·HHH
+    sub_mod_device_fast(&temp.vars.U1, &temp.vars.U2, &R->X);
+    mul_mod_device(&temp.vars.U1, &temp.vars.R_big, &temp.vars.U1);
+    mul_mod_device(&temp.vars.S1, &temp.vars.S1, &temp.vars.HHH);
+    sub_mod_device_fast(&R->Y, &temp.vars.U1, &temp.vars.S1);
     
-    
-    mul_mod_device(&temp.vars.temp2, &temp.vars.R_big, &temp.vars.R_big);  
-    
-    
-    sub_mod_device_fast(&R->X, &temp.vars.temp2, &temp.vars.Z2Z2);  
-    sub_mod_device_fast(&R->X, &R->X, &temp.vars.temp1);            
-    sub_mod_device_fast(&R->X, &R->X, &temp.vars.temp1);            
-    
-    
-    sub_mod_device_fast(&temp.vars.U2, &temp.vars.temp1, &R->X);     
-    mul_mod_device(&temp.vars.U2, &temp.vars.R_big, &temp.vars.U2);  
-    
-    mul_mod_device(&temp.vars.S2, &temp.vars.S1, &temp.vars.Z2Z2);   
-    sub_mod_device_fast(&R->Y, &temp.vars.U2, &temp.vars.S2);       
-    
-    
-    mul_mod_device(&temp.vars.temp1, &P->Z, &Q->Z);
-    mul_mod_device(&R->Z, &temp.vars.temp1, &temp.vars.H);
+    // Z3 = Z1·Z2·H
+    mul_mod_device(&R->Z, &P->Z, &Q->Z);
+    mul_mod_device(&R->Z, &R->Z, &temp.vars.H);
     
     R->infinity = false;
 }
-
-
 
 
 __constant__ uint32_t c_K[64] = {
@@ -700,93 +689,74 @@ __device__ __forceinline__ uint32_t sigma1(uint32_t x) {
 }
 
 __device__ void sha256(const uint8_t* data, int len, uint8_t hash[32]) {
-    
-    uint32_t h0 = 0x6a09e667ul;
-    uint32_t h1 = 0xbb67ae85ul;
-    uint32_t h2 = 0x3c6ef372ul;
-    uint32_t h3 = 0xa54ff53aul;
-    uint32_t h4 = 0x510e527ful;
-    uint32_t h5 = 0x9b05688cul;
-    uint32_t h6 = 0x1f83d9abul;
-    uint32_t h7 = 0x5be0cd19ul;
-    
+    uint32_t h0 = 0x6a09e667ul, h1 = 0xbb67ae85ul, h2 = 0x3c6ef372ul, h3 = 0xa54ff53aul;
+    uint32_t h4 = 0x510e527ful, h5 = 0x9b05688cul, h6 = 0x1f83d9abul, h7 = 0x5be0cd19ul;
     
     uint32_t w[64];
+    const uint32_t* data32 = (const uint32_t*)data;
+    int len_aligned = len & ~3;
     
-    
-    
+    // Load first 16 words using vectorized access
+    #pragma unroll
     for (int i = 0; i < 16; ++i) {
-        if (i * 4 < len) {
-            
+        int offset = i * 4;
+        if (offset < len_aligned) {
+            w[i] = __byte_perm(data32[i], 0, 0x0123);
+        } else if (offset < len) {
             uint32_t val = 0;
-            
-            for (int j = 0; j < 4; ++j) {
-                int idx = i * 4 + j;
-                if (idx < len) {
-                    val |= ((uint32_t)data[idx]) << (24 - j * 8);
-                } else if (idx == len) {
-                    val |= 0x80u << (24 - j * 8);  
-                }
+            #pragma unroll
+            for (int j = 0; j < 4 && offset + j < len; ++j) {
+                val |= ((uint32_t)data[offset + j]) << (24 - j * 8);
             }
+            if (offset + 4 > len) val |= 0x80u << (24 - (len - offset) * 8);
             w[i] = val;
-        } else if (i * 4 == len) {
-            w[i] = 0x80000000u;  
-        } else if (i == 14) {
-            w[i] = 0;  
-        } else if (i == 15) {
-            w[i] = (uint32_t)(len * 8);  
+        } else if (offset == len) {
+            w[i] = 0x80000000u;
         } else {
-            w[i] = 0;
+            w[i] = (i == 15) ? (uint32_t)(len * 8) : 0;
         }
     }
     
-    
-    
+    // Message schedule with reduced dependencies
+    #pragma unroll
     for (int i = 16; i < 64; ++i) {
-        w[i] = sigma1(w[i - 2]) + w[i - 7] + sigma0(w[i - 15]) + w[i - 16];
+        uint32_t s0 = sigma0(w[i - 15]);
+        uint32_t s1 = sigma1(w[i - 2]);
+        w[i] = w[i - 16] + s0 + w[i - 7] + s1;
     }
-    
     
     uint32_t a = h0, b = h1, c = h2, d = h3;
     uint32_t e = h4, f = h5, g = h6, h = h7;
     
-    
-    
+    // Compression with partial unrolling for better register usage
+    #pragma unroll
     for (int i = 0; i < 64; ++i) {
-        uint32_t T1 = h + Sigma1(e) + Ch(e, f, g) + c_K[i] + w[i];
-        uint32_t T2 = Sigma0(a) + Maj(a, b, c);
-        h = g;
-        g = f;
-        f = e;
-        e = d + T1;
-        d = c;
-        c = b;
-        b = a;
-        a = T1 + T2;
+        uint32_t s1 = Sigma1(e);
+        uint32_t ch = Ch(e, f, g);
+        uint32_t temp1 = h + s1 + ch + c_K[i] + w[i];
+        uint32_t s0 = Sigma0(a);
+        uint32_t maj = Maj(a, b, c);
+        uint32_t temp2 = s0 + maj;
+        
+        h = g; g = f; f = e;
+        e = d + temp1;
+        d = c; c = b; b = a;
+        a = temp1 + temp2;
     }
     
+    h0 += a; h1 += b; h2 += c; h3 += d;
+    h4 += e; h5 += f; h6 += g; h7 += h;
     
-    h0 += a;
-    h1 += b;
-    h2 += c;
-    h3 += d;
-    h4 += e;
-    h5 += f;
-    h6 += g;
-    h7 += h;
-    
-    
-    
-    for (int i = 0; i < 4; ++i) {
-        hash[i]      = (h0 >> (24 - i * 8)) & 0xFF;
-        hash[i + 4]  = (h1 >> (24 - i * 8)) & 0xFF;
-        hash[i + 8]  = (h2 >> (24 - i * 8)) & 0xFF;
-        hash[i + 12] = (h3 >> (24 - i * 8)) & 0xFF;
-        hash[i + 16] = (h4 >> (24 - i * 8)) & 0xFF;
-        hash[i + 20] = (h5 >> (24 - i * 8)) & 0xFF;
-        hash[i + 24] = (h6 >> (24 - i * 8)) & 0xFF;
-        hash[i + 28] = (h7 >> (24 - i * 8)) & 0xFF;
-    }
+    // Direct write output
+    uint32_t* out = (uint32_t*)hash;
+    out[0] = __byte_perm(h0, 0, 0x0123);
+    out[1] = __byte_perm(h1, 0, 0x0123);
+    out[2] = __byte_perm(h2, 0, 0x0123);
+    out[3] = __byte_perm(h3, 0, 0x0123);
+    out[4] = __byte_perm(h4, 0, 0x0123);
+    out[5] = __byte_perm(h5, 0, 0x0123);
+    out[6] = __byte_perm(h6, 0, 0x0123);
+    out[7] = __byte_perm(h7, 0, 0x0123);
 }
 
 
@@ -1047,37 +1017,54 @@ __device__ void jacobian_to_affine(ECPoint *R, const ECPointJac *P) {
     R->infinity = false;
 }
 
-
 __device__ __forceinline__ void scalar_multiply_multi_base_jac(ECPointJac *result, const BigInt *scalar) {
-    point_set_infinity_jac(result);
-
+    // Find first non-zero window to avoid infinity checks in main loop
+    int first_window = -1;
+    
+    #pragma unroll
     for (int window = NUM_BASE_POINTS - 1; window >= 0; window--) {
         int bit_index = window * WINDOW_SIZE;
+        uint32_t word_idx = bit_index >> 5;  // Divide by 32
+        uint32_t bit_offset = bit_index & 31; // Modulo 32
         
-        
-        uint32_t window_val = 0;
-        
-        for (int i = 0; i < WINDOW_SIZE; i++) {
-            if (get_bit(scalar, bit_index + i)) {
-                window_val |= (1U << i);
-            }
+        // Extract window value
+        uint32_t window_val = scalar->data[word_idx] >> bit_offset;
+        if (bit_offset + WINDOW_SIZE > 32) {
+            window_val |= scalar->data[word_idx + 1] << (32 - bit_offset);
         }
+        window_val &= (1U << WINDOW_SIZE) - 1;
         
-        
-        if (window_val == 0) continue;
-        
-        
-        if (window_val < (1 << WINDOW_SIZE)) {
-            if (result->infinity) {
-                
-                point_copy_jac(result, &G_base_precomp[window][window_val]);
-            } else {
-                
-                ECPointJac temp;
-                add_point_jac(&temp, result, &G_base_precomp[window][window_val]);
-                point_copy_jac(result, &temp);
-            }
+        if (window_val != 0) {
+            // Initialize with first non-zero window
+            *result = G_base_precomp[window][window_val];
+            first_window = window;
+            break;
         }
+    }
+    
+    // Handle case where scalar is zero
+    if (first_window == -1) {
+        point_set_infinity_jac(result);
+        return;
+    }
+    
+    // Process remaining windows
+    #pragma unroll
+    for (int window = first_window - 1; window >= 0; window--) {
+        int bit_index = window * WINDOW_SIZE;
+        uint32_t word_idx = bit_index >> 5;
+        uint32_t bit_offset = bit_index & 31;
+        
+        uint32_t window_val = scalar->data[word_idx] >> bit_offset;
+        if (bit_offset + WINDOW_SIZE > 32) {
+            window_val |= scalar->data[word_idx + 1] << (32 - bit_offset);
+        }
+        window_val &= (1U << WINDOW_SIZE) - 1;
+        
+		ECPointJac temp = G_base_precomp[window][window_val];
+		if (window_val != 0) {
+			add_point_jac(result, result, &temp);
+		}
     }
 }
 

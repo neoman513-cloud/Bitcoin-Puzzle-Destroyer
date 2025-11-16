@@ -226,7 +226,7 @@ __global__ void start(uint64_t seed)
     uint8_t hash160_batch[BATCH_SIZE][20];
     
 	
-
+	#pragma unroll
 	for (int i = 0; i < BATCH_SIZE; ++i) {
 		generate_random_in_range(&priv_batch[i], &state, &d_min_bigint, &d_max_bigint);
 		scalar_multiply_multi_base_jac(&result_jac_batch[i], &priv_batch[i]);
@@ -246,12 +246,9 @@ __global__ void start(uint64_t seed)
 	// Unrolled comparison loop with constant memory target
 	#pragma unroll
 	for (int i = 0; i < BATCH_SIZE; ++i) {
-		if (compare_hash160_fast(hash160_batch[i], d_target)) {
-			if (atomicCAS((int*)&g_found, 0, 1) == 0) {
-				bigint_to_hex(&priv_batch[i], g_found_hex);
-				hash160_to_hex(hash160_batch[i], g_found_hash160);
-			}
-			return;
+		if (compare_hash160_fast(hash160_batch[i], d_target) && atomicCAS((int*)&g_found, 0, 1) == 0) {
+			bigint_to_hex(&priv_batch[i], g_found_hex);
+			hash160_to_hex(hash160_batch[i], g_found_hash160);
 		}
 	}
 	
