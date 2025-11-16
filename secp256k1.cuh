@@ -174,37 +174,160 @@ __device__ __forceinline__ void add_9word_with_carry(uint32_t r[9], const uint32
 
 __device__ __forceinline__ void mul_mod_device(BigInt *res, const BigInt *a, const BigInt *b) {
     
+    // Comba multiplication using 96-bit accumulator (3x32-bit words)
     uint32_t product[16];
     
-    #pragma unroll
-    for (int i = 0; i < 16; i++) {
-        product[i] = 0;
-    }
+    // We'll use inline PTX for mad.lo.cc.u32 and madc.hi.cc.u32 for efficient multiply-accumulate
+    #define MULADD(i, j) \
+        asm volatile( \
+            "mad.lo.cc.u32 %0, %3, %4, %0;\n\t" \
+            "madc.hi.cc.u32 %1, %3, %4, %1;\n\t" \
+            "addc.u32 %2, %2, 0;" \
+            : "+r"(c0), "+r"(c1), "+r"(c2) \
+            : "r"(a->data[i]), "r"(b->data[j]) \
+        );
     
-    #pragma unroll
-    for (int i = 0; i < BIGINT_WORDS; i++) {
-        uint64_t carry = 0;
-        
-        #pragma unroll
-        for (int j = 0; j < BIGINT_WORDS; j++) {
-            uint64_t mul = (uint64_t)a->data[i] * (uint64_t)b->data[j];
-            uint64_t sum = (uint64_t)product[i + j] + mul + carry;
-            
-            product[i + j] = (uint32_t)sum;
-            carry = sum >> 32;
-        }
-        
-        product[i + BIGINT_WORDS] = (uint32_t)carry;
-    }
+    uint32_t c0, c1, c2;
     
+    // Column 0
+    c0 = c1 = c2 = 0;
+    asm("mul.lo.u32 %0, %1, %2;" : "=r"(c0) : "r"(a->data[0]), "r"(b->data[0]));
+    asm("mul.hi.u32 %0, %1, %2;" : "=r"(c1) : "r"(a->data[0]), "r"(b->data[0]));
+    product[0] = c0;
+    
+    // Column 1
+    c0 = c1; c1 = c2; c2 = 0;
+    MULADD(0, 1);
+    MULADD(1, 0);
+    product[1] = c0;
+    
+    // Column 2
+    c0 = c1; c1 = c2; c2 = 0;
+    MULADD(0, 2);
+    MULADD(1, 1);
+    MULADD(2, 0);
+    product[2] = c0;
+    
+    // Column 3
+    c0 = c1; c1 = c2; c2 = 0;
+    MULADD(0, 3);
+    MULADD(1, 2);
+    MULADD(2, 1);
+    MULADD(3, 0);
+    product[3] = c0;
+    
+    // Column 4
+    c0 = c1; c1 = c2; c2 = 0;
+    MULADD(0, 4);
+    MULADD(1, 3);
+    MULADD(2, 2);
+    MULADD(3, 1);
+    MULADD(4, 0);
+    product[4] = c0;
+    
+    // Column 5
+    c0 = c1; c1 = c2; c2 = 0;
+    MULADD(0, 5);
+    MULADD(1, 4);
+    MULADD(2, 3);
+    MULADD(3, 2);
+    MULADD(4, 1);
+    MULADD(5, 0);
+    product[5] = c0;
+    
+    // Column 6
+    c0 = c1; c1 = c2; c2 = 0;
+    MULADD(0, 6);
+    MULADD(1, 5);
+    MULADD(2, 4);
+    MULADD(3, 3);
+    MULADD(4, 2);
+    MULADD(5, 1);
+    MULADD(6, 0);
+    product[6] = c0;
+    
+    // Column 7
+    c0 = c1; c1 = c2; c2 = 0;
+    MULADD(0, 7);
+    MULADD(1, 6);
+    MULADD(2, 5);
+    MULADD(3, 4);
+    MULADD(4, 3);
+    MULADD(5, 2);
+    MULADD(6, 1);
+    MULADD(7, 0);
+    product[7] = c0;
+    
+    // Column 8
+    c0 = c1; c1 = c2; c2 = 0;
+    MULADD(1, 7);
+    MULADD(2, 6);
+    MULADD(3, 5);
+    MULADD(4, 4);
+    MULADD(5, 3);
+    MULADD(6, 2);
+    MULADD(7, 1);
+    product[8] = c0;
+    
+    // Column 9
+    c0 = c1; c1 = c2; c2 = 0;
+    MULADD(2, 7);
+    MULADD(3, 6);
+    MULADD(4, 5);
+    MULADD(5, 4);
+    MULADD(6, 3);
+    MULADD(7, 2);
+    product[9] = c0;
+    
+    // Column 10
+    c0 = c1; c1 = c2; c2 = 0;
+    MULADD(3, 7);
+    MULADD(4, 6);
+    MULADD(5, 5);
+    MULADD(6, 4);
+    MULADD(7, 3);
+    product[10] = c0;
+    
+    // Column 11
+    c0 = c1; c1 = c2; c2 = 0;
+    MULADD(4, 7);
+    MULADD(5, 6);
+    MULADD(6, 5);
+    MULADD(7, 4);
+    product[11] = c0;
+    
+    // Column 12
+    c0 = c1; c1 = c2; c2 = 0;
+    MULADD(5, 7);
+    MULADD(6, 6);
+    MULADD(7, 5);
+    product[12] = c0;
+    
+    // Column 13
+    c0 = c1; c1 = c2; c2 = 0;
+    MULADD(6, 7);
+    MULADD(7, 6);
+    product[13] = c0;
+    
+    // Column 14
+    c0 = c1; c1 = c2; c2 = 0;
+    MULADD(7, 7);
+    product[14] = c0;
+    
+    // Column 15
+    product[15] = c1;
+    
+    #undef MULADD
+    
+    // Initialize result with lower 8 words
     uint32_t result[9];
-    
     #pragma unroll
     for (int i = 0; i < BIGINT_WORDS; i++) {
         result[i] = product[i];
     }
     result[8] = 0;
     
+    // First reduction step: multiply upper words by 977 and add
     uint64_t c = 0;
     
     #pragma unroll
@@ -224,6 +347,7 @@ __device__ __forceinline__ void mul_mod_device(BigInt *res, const BigInt *a, con
     
     result[8] = (uint32_t)c;
     
+    // Second reduction step: add upper words directly
     c = 0;
     
     #pragma unroll
@@ -233,9 +357,9 @@ __device__ __forceinline__ void mul_mod_device(BigInt *res, const BigInt *a, con
         c = sum >> 32;
     }
     
+    // Handle final overflow
     uint32_t overflow = result[8];
     uint32_t has_overflow = (uint32_t)(-(int32_t)(overflow != 0));
-
     uint32_t lo977, hi977;
     asm volatile(
         "mul.lo.u32 %0, %2, 977;\n\t"
@@ -243,18 +367,15 @@ __device__ __forceinline__ void mul_mod_device(BigInt *res, const BigInt *a, con
         : "=r"(lo977), "=r"(hi977)
         : "r"(overflow)
     );
-
     lo977 &= has_overflow;
     hi977 &= has_overflow;
     uint32_t masked_overflow = overflow & has_overflow;
-
     uint64_t sum0 = (uint64_t)result[0] + (uint64_t)lo977;
     uint64_t sum1 = (uint64_t)result[1] + (uint64_t)masked_overflow + (sum0 >> 32) + hi977;
-
     result[0] = (uint32_t)sum0;
     result[1] = (uint32_t)sum1;
-
     uint64_t carry = sum1 >> 32;
+    
     #pragma unroll
     for (int i = 2; i < BIGINT_WORDS; i++) {
         uint64_t sum = (uint64_t)result[i] + carry;
@@ -262,11 +383,13 @@ __device__ __forceinline__ void mul_mod_device(BigInt *res, const BigInt *a, con
         carry = sum >> 32;
     }
     
+    // Copy result to output
     #pragma unroll
     for (int i = 0; i < BIGINT_WORDS; i++) {
         res->data[i] = result[i];
     }
     
+    // Final conditional subtraction
     uint32_t tmp[8];
     asm volatile(
         "sub.cc.u32 %0, %8, %16;\n\t"
@@ -294,7 +417,6 @@ __device__ __forceinline__ void mul_mod_device(BigInt *res, const BigInt *a, con
         res->data[i] = (tmp[i] & mask) | (res->data[i] & ~mask);
     }
 }
-
 __device__ __forceinline__ void add_mod_device(BigInt *res, const BigInt *a, const BigInt *b) {
     uint32_t carry;
     
