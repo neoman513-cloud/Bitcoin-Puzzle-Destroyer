@@ -1143,7 +1143,6 @@ __device__ void jacobian_batch_to_hash160(const ECPointJac points[BATCH_SIZE], u
     for (int i = 0; i < BATCH_SIZE; i++) {
         
         uint32_t z_check = points[i].Z.data[0];
-        #pragma unroll
         for (int j = 1; j < 8; j++) {
             z_check |= points[i].Z.data[j];
         }

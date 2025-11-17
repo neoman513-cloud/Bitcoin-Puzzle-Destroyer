@@ -14,8 +14,8 @@
 #include <inttypes.h>
 #include <windows.h>
 #include <bcrypt.h>
-#pragma comment(lib, "bcrypt.lib")
 #include <chrono>
+#pragma comment(lib, "bcrypt.lib")
 #pragma once
 
 __device__ __host__ __forceinline__ uint8_t hex_char_to_byte(char c) {
