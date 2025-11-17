@@ -30,11 +30,11 @@ you can set the DEVICE ID as the last parameter as 0, 1, 2, 3 etc...when you run
 
 also in secp256k1.cuh there are few parameters at top of the file that you can change for your preference:
 
-`#define BIGINT_WORDS 8`
-`#define WINDOW_SIZE 16`
-`#define NUM_BASE_POINTS 16`
-`#define BATCH_SIZE 128`
-`#define MOD_EXP 4`
+`#define BIGINT_WORDS 8`\
+`#define WINDOW_SIZE 16`\
+`#define NUM_BASE_POINTS 16`\
+`#define BATCH_SIZE 128`\
+`#define MOD_EXP 4`\
 
 BTC for donations:
 
