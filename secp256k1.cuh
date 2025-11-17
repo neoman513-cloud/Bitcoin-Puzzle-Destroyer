@@ -171,12 +171,7 @@ __device__ __forceinline__ void add_9word_with_carry(uint32_t r[9], const uint32
     }
     r[8] = carry; 
 }
-
 __device__ __forceinline__ void mul_mod_device(BigInt *res, const BigInt *a, const BigInt *b) {
-    
-    
-    uint32_t product[16];
-    
     
     #define MULADD(i, j) \
         asm volatile( \
@@ -188,34 +183,31 @@ __device__ __forceinline__ void mul_mod_device(BigInt *res, const BigInt *a, con
         );
     
     uint32_t c0, c1, c2;
-    
+    uint32_t result[8];
+    uint32_t prod_high[8];
     
     c0 = c1 = c2 = 0;
     asm("mul.lo.u32 %0, %1, %2;" : "=r"(c0) : "r"(a->data[0]), "r"(b->data[0]));
     asm("mul.hi.u32 %0, %1, %2;" : "=r"(c1) : "r"(a->data[0]), "r"(b->data[0]));
-    product[0] = c0;
-    
+    result[0] = c0;
     
     c0 = c1; c1 = c2; c2 = 0;
     MULADD(0, 1);
     MULADD(1, 0);
-    product[1] = c0;
-    
+    result[1] = c0;
     
     c0 = c1; c1 = c2; c2 = 0;
     MULADD(0, 2);
     MULADD(1, 1);
     MULADD(2, 0);
-    product[2] = c0;
-    
+    result[2] = c0;
     
     c0 = c1; c1 = c2; c2 = 0;
     MULADD(0, 3);
     MULADD(1, 2);
     MULADD(2, 1);
     MULADD(3, 0);
-    product[3] = c0;
-    
+    result[3] = c0;
     
     c0 = c1; c1 = c2; c2 = 0;
     MULADD(0, 4);
@@ -223,9 +215,8 @@ __device__ __forceinline__ void mul_mod_device(BigInt *res, const BigInt *a, con
     MULADD(2, 2);
     MULADD(3, 1);
     MULADD(4, 0);
-    product[4] = c0;
-    
-    
+    result[4] = c0;
+
     c0 = c1; c1 = c2; c2 = 0;
     MULADD(0, 5);
     MULADD(1, 4);
@@ -233,8 +224,7 @@ __device__ __forceinline__ void mul_mod_device(BigInt *res, const BigInt *a, con
     MULADD(3, 2);
     MULADD(4, 1);
     MULADD(5, 0);
-    product[5] = c0;
-    
+    result[5] = c0;
     
     c0 = c1; c1 = c2; c2 = 0;
     MULADD(0, 6);
@@ -244,8 +234,7 @@ __device__ __forceinline__ void mul_mod_device(BigInt *res, const BigInt *a, con
     MULADD(4, 2);
     MULADD(5, 1);
     MULADD(6, 0);
-    product[6] = c0;
-    
+    result[6] = c0;
     
     c0 = c1; c1 = c2; c2 = 0;
     MULADD(0, 7);
@@ -256,8 +245,7 @@ __device__ __forceinline__ void mul_mod_device(BigInt *res, const BigInt *a, con
     MULADD(5, 2);
     MULADD(6, 1);
     MULADD(7, 0);
-    product[7] = c0;
-    
+    result[7] = c0;
     
     c0 = c1; c1 = c2; c2 = 0;
     MULADD(1, 7);
@@ -267,8 +255,7 @@ __device__ __forceinline__ void mul_mod_device(BigInt *res, const BigInt *a, con
     MULADD(5, 3);
     MULADD(6, 2);
     MULADD(7, 1);
-    product[8] = c0;
-    
+    prod_high[0] = c0;
     
     c0 = c1; c1 = c2; c2 = 0;
     MULADD(2, 7);
@@ -277,8 +264,7 @@ __device__ __forceinline__ void mul_mod_device(BigInt *res, const BigInt *a, con
     MULADD(5, 4);
     MULADD(6, 3);
     MULADD(7, 2);
-    product[9] = c0;
-    
+    prod_high[1] = c0;
     
     c0 = c1; c1 = c2; c2 = 0;
     MULADD(3, 7);
@@ -286,109 +272,193 @@ __device__ __forceinline__ void mul_mod_device(BigInt *res, const BigInt *a, con
     MULADD(5, 5);
     MULADD(6, 4);
     MULADD(7, 3);
-    product[10] = c0;
-    
+    prod_high[2] = c0;
     
     c0 = c1; c1 = c2; c2 = 0;
     MULADD(4, 7);
     MULADD(5, 6);
     MULADD(6, 5);
     MULADD(7, 4);
-    product[11] = c0;
-    
+    prod_high[3] = c0;
     
     c0 = c1; c1 = c2; c2 = 0;
     MULADD(5, 7);
     MULADD(6, 6);
     MULADD(7, 5);
-    product[12] = c0;
-    
+    prod_high[4] = c0;
     
     c0 = c1; c1 = c2; c2 = 0;
     MULADD(6, 7);
     MULADD(7, 6);
-    product[13] = c0;
-    
+    prod_high[5] = c0;
     
     c0 = c1; c1 = c2; c2 = 0;
     MULADD(7, 7);
-    product[14] = c0;
+    prod_high[6] = c0;
     
-    
-    product[15] = c1;
+    prod_high[7] = c1;
     
     #undef MULADD
     
-    
-    uint32_t result[9];
-    
-    for (int i = 0; i < BIGINT_WORDS; i++) {
-        result[i] = product[i];
-    }
-    result[8] = 0;
-    
-    
-    uint64_t c = 0;
-    
-    
-    for (int i = 0; i < BIGINT_WORDS; i++) {
-        uint32_t lo977, hi977;
-        asm volatile(
-            "mul.lo.u32 %0, %2, 977;\n\t"
-            "mul.hi.u32 %1, %2, 977;\n\t"
-            : "=r"(lo977), "=r"(hi977)
-            : "r"(product[8 + i])
-        );
-        
-        uint64_t sum = (uint64_t)result[i] + (uint64_t)lo977 + c;
-        result[i] = (uint32_t)sum;
-        c = (sum >> 32) + hi977;
-    }
-    
-    result[8] = (uint32_t)c;
-    
-    
-    c = 0;
-    
-    
-    for (int i = 0; i < BIGINT_WORDS; i++) {
-        uint64_t sum = (uint64_t)result[i + 1] + (uint64_t)product[8 + i] + c;
-        result[i + 1] = (uint32_t)sum;
-        c = sum >> 32;
-    }
-    
-    
-    uint32_t overflow = result[8];
-    uint32_t has_overflow = (uint32_t)(-(int32_t)(overflow != 0));
     uint32_t lo977, hi977;
+    uint64_t sum, carry;
+    
     asm volatile(
         "mul.lo.u32 %0, %2, 977;\n\t"
-        "mul.hi.u32 %1, %2, 977;\n\t"
+        "mul.hi.u32 %1, %2, 977;"
+        : "=r"(lo977), "=r"(hi977)
+        : "r"(prod_high[0])
+    );
+    sum = (uint64_t)result[0] + (uint64_t)lo977;
+    result[0] = (uint32_t)sum;
+    carry = (sum >> 32) + hi977;
+    
+    asm volatile(
+        "mul.lo.u32 %0, %2, 977;\n\t"
+        "mul.hi.u32 %1, %2, 977;"
+        : "=r"(lo977), "=r"(hi977)
+        : "r"(prod_high[1])
+    );
+    sum = (uint64_t)result[1] + (uint64_t)lo977 + carry;
+    result[1] = (uint32_t)sum;
+    carry = (sum >> 32) + hi977;
+    
+    asm volatile(
+        "mul.lo.u32 %0, %2, 977;\n\t"
+        "mul.hi.u32 %1, %2, 977;"
+        : "=r"(lo977), "=r"(hi977)
+        : "r"(prod_high[2])
+    );
+    sum = (uint64_t)result[2] + (uint64_t)lo977 + carry;
+    result[2] = (uint32_t)sum;
+    carry = (sum >> 32) + hi977;
+    
+    asm volatile(
+        "mul.lo.u32 %0, %2, 977;\n\t"
+        "mul.hi.u32 %1, %2, 977;"
+        : "=r"(lo977), "=r"(hi977)
+        : "r"(prod_high[3])
+    );
+    sum = (uint64_t)result[3] + (uint64_t)lo977 + carry;
+    result[3] = (uint32_t)sum;
+    carry = (sum >> 32) + hi977;
+    
+    asm volatile(
+        "mul.lo.u32 %0, %2, 977;\n\t"
+        "mul.hi.u32 %1, %2, 977;"
+        : "=r"(lo977), "=r"(hi977)
+        : "r"(prod_high[4])
+    );
+    sum = (uint64_t)result[4] + (uint64_t)lo977 + carry;
+    result[4] = (uint32_t)sum;
+    carry = (sum >> 32) + hi977;
+    
+    asm volatile(
+        "mul.lo.u32 %0, %2, 977;\n\t"
+        "mul.hi.u32 %1, %2, 977;"
+        : "=r"(lo977), "=r"(hi977)
+        : "r"(prod_high[5])
+    );
+    sum = (uint64_t)result[5] + (uint64_t)lo977 + carry;
+    result[5] = (uint32_t)sum;
+    carry = (sum >> 32) + hi977;
+    
+    asm volatile(
+        "mul.lo.u32 %0, %2, 977;\n\t"
+        "mul.hi.u32 %1, %2, 977;"
+        : "=r"(lo977), "=r"(hi977)
+        : "r"(prod_high[6])
+    );
+    sum = (uint64_t)result[6] + (uint64_t)lo977 + carry;
+    result[6] = (uint32_t)sum;
+    carry = (sum >> 32) + hi977;
+    
+    asm volatile(
+        "mul.lo.u32 %0, %2, 977;\n\t"
+        "mul.hi.u32 %1, %2, 977;"
+        : "=r"(lo977), "=r"(hi977)
+        : "r"(prod_high[7])
+    );
+    sum = (uint64_t)result[7] + (uint64_t)lo977 + carry;
+    result[7] = (uint32_t)sum;
+    uint32_t overflow = (uint32_t)((sum >> 32) + hi977);
+    
+    carry = 0;
+
+    sum = (uint64_t)result[1] + (uint64_t)prod_high[0] + carry;
+    result[1] = (uint32_t)sum;
+    carry = sum >> 32;
+    
+    sum = (uint64_t)result[2] + (uint64_t)prod_high[1] + carry;
+    result[2] = (uint32_t)sum;
+    carry = sum >> 32;
+    
+    sum = (uint64_t)result[3] + (uint64_t)prod_high[2] + carry;
+    result[3] = (uint32_t)sum;
+    carry = sum >> 32;
+    
+    sum = (uint64_t)result[4] + (uint64_t)prod_high[3] + carry;
+    result[4] = (uint32_t)sum;
+    carry = sum >> 32;
+    
+    sum = (uint64_t)result[5] + (uint64_t)prod_high[4] + carry;
+    result[5] = (uint32_t)sum;
+    carry = sum >> 32;
+    
+    sum = (uint64_t)result[6] + (uint64_t)prod_high[5] + carry;
+    result[6] = (uint32_t)sum;
+    carry = sum >> 32;
+    
+    sum = (uint64_t)result[7] + (uint64_t)prod_high[6] + carry;
+    result[7] = (uint32_t)sum;
+    carry = sum >> 32;
+    
+    overflow += prod_high[7] + (uint32_t)carry;
+    
+    uint32_t has_overflow = (uint32_t)(-(int32_t)(overflow != 0));
+    asm volatile(
+        "mul.lo.u32 %0, %2, 977;\n\t"
+        "mul.hi.u32 %1, %2, 977;"
         : "=r"(lo977), "=r"(hi977)
         : "r"(overflow)
     );
     lo977 &= has_overflow;
     hi977 &= has_overflow;
     uint32_t masked_overflow = overflow & has_overflow;
+    
     uint64_t sum0 = (uint64_t)result[0] + (uint64_t)lo977;
     uint64_t sum1 = (uint64_t)result[1] + (uint64_t)masked_overflow + (sum0 >> 32) + hi977;
     result[0] = (uint32_t)sum0;
     result[1] = (uint32_t)sum1;
-    uint64_t carry = sum1 >> 32;
+    carry = sum1 >> 32;
     
+    sum = (uint64_t)result[2] + carry;
+    result[2] = (uint32_t)sum;
+    carry = sum >> 32;
     
-    for (int i = 2; i < BIGINT_WORDS; i++) {
-        uint64_t sum = (uint64_t)result[i] + carry;
-        result[i] = (uint32_t)sum;
-        carry = sum >> 32;
-    }
+    sum = (uint64_t)result[3] + carry;
+    result[3] = (uint32_t)sum;
+    carry = sum >> 32;
     
+    sum = (uint64_t)result[4] + carry;
+    result[4] = (uint32_t)sum;
+    carry = sum >> 32;
     
+    sum = (uint64_t)result[5] + carry;
+    result[5] = (uint32_t)sum;
+    carry = sum >> 32;
     
-    for (int i = 0; i < BIGINT_WORDS; i++) {
+    sum = (uint64_t)result[6] + carry;
+    result[6] = (uint32_t)sum;
+    carry = sum >> 32;
+    
+    sum = (uint64_t)result[7] + carry;
+    result[7] = (uint32_t)sum;
+    
+    #pragma unroll
+    for (int i = 0; i < 8; i++) {
         res->data[i] = result[i];
     }
-    
     
     uint32_t tmp[8];
     asm volatile(
@@ -412,9 +482,14 @@ __device__ __forceinline__ void mul_mod_device(BigInt *res, const BigInt *a, con
     asm volatile("subc.u32 %0, 0, 0;" : "=r"(borrow));
     uint32_t mask = ~borrow;
     
-    for (int i = 0; i < 8; i++) {
-        res->data[i] = (tmp[i] & mask) | (res->data[i] & ~mask);
-    }
+    res->data[0] = (tmp[0] & mask) | (res->data[0] & ~mask);
+    res->data[1] = (tmp[1] & mask) | (res->data[1] & ~mask);
+    res->data[2] = (tmp[2] & mask) | (res->data[2] & ~mask);
+    res->data[3] = (tmp[3] & mask) | (res->data[3] & ~mask);
+    res->data[4] = (tmp[4] & mask) | (res->data[4] & ~mask);
+    res->data[5] = (tmp[5] & mask) | (res->data[5] & ~mask);
+    res->data[6] = (tmp[6] & mask) | (res->data[6] & ~mask);
+    res->data[7] = (tmp[7] & mask) | (res->data[7] & ~mask);
 }
 __device__ __forceinline__ void add_mod_device(BigInt *res, const BigInt *a, const BigInt *b) {
     uint32_t carry;
