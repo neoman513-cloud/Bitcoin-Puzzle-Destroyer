@@ -34,7 +34,7 @@ also in secp256k1.cuh there are few parameters at top of the file that you can c
 `#define WINDOW_SIZE 16`\
 `#define NUM_BASE_POINTS 16`\
 `#define BATCH_SIZE 128`\
-`#define MOD_EXP 4`\
+`#define MOD_EXP 4`
 
 BTC for donations:
 
