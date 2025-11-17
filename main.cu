@@ -389,7 +389,7 @@ int main(int argc, char* argv[]) {
     cudaDeviceProp prop;
     cudaGetDeviceProperties(&prop, 0);
     
-    int blocks = 4096;  
+    int blocks = prop.multiProcessorCount * 16;  
     int threads = 256;
     int device_id = (argc > 4) ? std::stoi(argv[4]) : 0;
     

@@ -6,7 +6,7 @@
 #define BIGINT_WORDS 8
 #define WINDOW_SIZE 16
 #define NUM_BASE_POINTS 16
-#define BATCH_SIZE 200
+#define BATCH_SIZE 216
 #define MOD_EXP 4
 
 
