@@ -6,7 +6,7 @@
 #define BIGINT_WORDS 8
 #define WINDOW_SIZE 16
 #define NUM_BASE_POINTS 16
-#define BATCH_SIZE 216
+#define BATCH_SIZE 128
 #define MOD_EXP 4
 
 
@@ -321,7 +321,7 @@ __device__ __forceinline__ void mul_mod_device(BigInt *res, const BigInt *a, con
     
     
     uint32_t result[9];
-    #pragma unroll
+    
     for (int i = 0; i < BIGINT_WORDS; i++) {
         result[i] = product[i];
     }
@@ -330,7 +330,7 @@ __device__ __forceinline__ void mul_mod_device(BigInt *res, const BigInt *a, con
     
     uint64_t c = 0;
     
-    #pragma unroll
+    
     for (int i = 0; i < BIGINT_WORDS; i++) {
         uint32_t lo977, hi977;
         asm volatile(
@@ -350,7 +350,7 @@ __device__ __forceinline__ void mul_mod_device(BigInt *res, const BigInt *a, con
     
     c = 0;
     
-    #pragma unroll
+    
     for (int i = 0; i < BIGINT_WORDS; i++) {
         uint64_t sum = (uint64_t)result[i + 1] + (uint64_t)product[8 + i] + c;
         result[i + 1] = (uint32_t)sum;
@@ -376,7 +376,7 @@ __device__ __forceinline__ void mul_mod_device(BigInt *res, const BigInt *a, con
     result[1] = (uint32_t)sum1;
     uint64_t carry = sum1 >> 32;
     
-    #pragma unroll
+    
     for (int i = 2; i < BIGINT_WORDS; i++) {
         uint64_t sum = (uint64_t)result[i] + carry;
         result[i] = (uint32_t)sum;
@@ -384,7 +384,7 @@ __device__ __forceinline__ void mul_mod_device(BigInt *res, const BigInt *a, con
     }
     
     
-    #pragma unroll
+    
     for (int i = 0; i < BIGINT_WORDS; i++) {
         res->data[i] = result[i];
     }
@@ -412,7 +412,7 @@ __device__ __forceinline__ void mul_mod_device(BigInt *res, const BigInt *a, con
     asm volatile("subc.u32 %0, 0, 0;" : "=r"(borrow));
     uint32_t mask = ~borrow;
     
-    #pragma unroll
+    
     for (int i = 0; i < 8; i++) {
         res->data[i] = (tmp[i] & mask) | (res->data[i] & ~mask);
     }
@@ -809,77 +809,86 @@ __device__ __forceinline__ uint32_t sigma0(uint32_t x) {
 __device__ __forceinline__ uint32_t sigma1(uint32_t x) {
     return rotr(x, 17) ^ rotr(x, 19) ^ (x >> 10);
 }
+__device__ __forceinline__ void sha256(const uint8_t *data, int len, uint8_t hash[32])
+{
+    // initial hash
+    uint32_t a = 0x6a09e667ul, b = 0xbb67ae85ul, c = 0x3c6ef372ul, d = 0xa54ff53aul;
+    uint32_t e = 0x510e527ful, f = 0x9b05688cul, g = 0x1f83d9abul, h = 0x5be0cd19ul;
 
-__device__ void sha256(const uint8_t* data, int len, uint8_t hash[32]) {
-    uint32_t h0 = 0x6a09e667ul, h1 = 0xbb67ae85ul, h2 = 0x3c6ef372ul, h3 = 0xa54ff53aul;
-    uint32_t h4 = 0x510e527ful, h5 = 0x9b05688cul, h6 = 0x1f83d9abul, h7 = 0x5be0cd19ul;
-    
+    // message schedule
     uint32_t w[64];
-    const uint32_t* data32 = (const uint32_t*)data;
-    int len_aligned = len & ~3;
+
+    // ---- LOAD DATA (no branches inside loop) ----
     
-    
-    #pragma unroll
-    for (int i = 0; i < 16; ++i) {
-        int offset = i * 4;
-        if (offset < len_aligned) {
-            w[i] = __byte_perm(data32[i], 0, 0x0123);
-        } else if (offset < len) {
-            uint32_t val = 0;
-            #pragma unroll
-            for (int j = 0; j < 4 && offset + j < len; ++j) {
-                val |= ((uint32_t)data[offset + j]) << (24 - j * 8);
-            }
-            if (offset + 4 > len) val |= 0x80u << (24 - (len - offset) * 8);
-            w[i] = val;
-        } else if (offset == len) {
-            w[i] = 0x80000000u;
-        } else {
-            w[i] = (i == 15) ? (uint32_t)(len * 8) : 0;
+    for (int i = 0; i < 16; i++)
+    {
+        uint32_t v = 0;
+        int o = i * 4;
+
+        if (o + 3 < len) {
+            v = ((uint32_t)data[o + 0] << 24) |
+                ((uint32_t)data[o + 1] << 16) |
+                ((uint32_t)data[o + 2] << 8)  |
+                ((uint32_t)data[o + 3] << 0);
+        } 
+        else if (o < len) {
+            // partial last word
+            for (int j = 0; j < 4 && o + j < len; j++)
+                v |= (uint32_t)data[o + j] << (24 - j * 8);
+
+            v |= 0x80u << (24 - (len - o) * 8);
         }
+        else if (o == len) {
+            v = 0x80000000u;
+        }
+        else {
+            v = 0;
+        }
+
+        w[i] = v;
     }
+
+    // append length * 8 at w[15]
+    w[15] = len * 8;
+
+    // ---- EXPAND SCHEDULE ----
     
+    for (int i = 16; i < 64; i++)
+        w[i] = w[i-16] + sigma0(w[i-15]) + w[i-7] + sigma1(w[i-2]);
+
+    // ---- MAIN LOOP ----
     
-    #pragma unroll
-    for (int i = 16; i < 64; ++i) {
-        uint32_t s0 = sigma0(w[i - 15]);
-        uint32_t s1 = sigma1(w[i - 2]);
-        w[i] = w[i - 16] + s0 + w[i - 7] + s1;
+    for (int i = 0; i < 64; i++)
+    {
+        uint32_t t1 = h + Sigma1(e) + Ch(e,f,g) + c_K[i] + w[i];
+        uint32_t t2 = Sigma0(a) + Maj(a,b,c);
+
+        h = g;
+        g = f;
+        f = e;
+        e = d + t1;
+        d = c;
+        c = b;
+        b = a;
+        a = t1 + t2;
     }
-    
-    uint32_t a = h0, b = h1, c = h2, d = h3;
-    uint32_t e = h4, f = h5, g = h6, h = h7;
-    
-    
-    #pragma unroll
-    for (int i = 0; i < 64; ++i) {
-        uint32_t s1 = Sigma1(e);
-        uint32_t ch = Ch(e, f, g);
-        uint32_t temp1 = h + s1 + ch + c_K[i] + w[i];
-        uint32_t s0 = Sigma0(a);
-        uint32_t maj = Maj(a, b, c);
-        uint32_t temp2 = s0 + maj;
-        
-        h = g; g = f; f = e;
-        e = d + temp1;
-        d = c; c = b; b = a;
-        a = temp1 + temp2;
-    }
-    
-    h0 += a; h1 += b; h2 += c; h3 += d;
-    h4 += e; h5 += f; h6 += g; h7 += h;
-    
-    
-    uint32_t* out = (uint32_t*)hash;
-    out[0] = __byte_perm(h0, 0, 0x0123);
-    out[1] = __byte_perm(h1, 0, 0x0123);
-    out[2] = __byte_perm(h2, 0, 0x0123);
-    out[3] = __byte_perm(h3, 0, 0x0123);
-    out[4] = __byte_perm(h4, 0, 0x0123);
-    out[5] = __byte_perm(h5, 0, 0x0123);
-    out[6] = __byte_perm(h6, 0, 0x0123);
-    out[7] = __byte_perm(h7, 0, 0x0123);
+
+    // ---- FINAL ADD ----
+    a += 0x6a09e667ul; b += 0xbb67ae85ul; c += 0x3c6ef372ul; d += 0xa54ff53aul;
+    e += 0x510e527ful; f += 0x9b05688cul; g += 0x1f83d9abul; h += 0x5be0cd19ul;
+
+    // ---- STORE OUTPUT (big-endian) ----
+    uint32_t *out = (uint32_t*)hash;
+    out[0] = __byte_perm(a, 0, 0x0123);
+    out[1] = __byte_perm(b, 0, 0x0123);
+    out[2] = __byte_perm(c, 0, 0x0123);
+    out[3] = __byte_perm(d, 0, 0x0123);
+    out[4] = __byte_perm(e, 0, 0x0123);
+    out[5] = __byte_perm(f, 0, 0x0123);
+    out[6] = __byte_perm(g, 0, 0x0123);
+    out[7] = __byte_perm(h, 0, 0x0123);
 }
+
 
 
 
@@ -961,7 +970,7 @@ __device__ void ripemd160(const uint8_t* __restrict__ msg,
     const uint32_t* msg32 = reinterpret_cast<const uint32_t*>(msg);
     uint32_t X[16];
     
-    #pragma unroll
+    
     for (int i = 0; i < 8; i++) {
         X[i] = msg32[i];
     }
@@ -1117,7 +1126,7 @@ __device__ __forceinline__ void scalar_multiply_multi_base_jac(ECPointJac *resul
     
     int first_window = -1;
     
-    #pragma unroll
+    
     for (int window = NUM_BASE_POINTS - 1; window >= 0; window--) {
         int bit_index = window * WINDOW_SIZE;
         uint32_t word_idx = bit_index >> 5;  
@@ -1145,7 +1154,7 @@ __device__ __forceinline__ void scalar_multiply_multi_base_jac(ECPointJac *resul
     }
     
     
-    #pragma unroll
+    
     for (int window = first_window - 1; window >= 0; window--) {
         int bit_index = window * WINDOW_SIZE;
         uint32_t word_idx = bit_index >> 5;
@@ -1170,7 +1179,7 @@ __device__ void jacobian_batch_to_hash160(const ECPointJac points[BATCH_SIZE], u
     uint8_t valid_count = 0;
     
     
-    #pragma unroll
+    
     for (int i = 0; i < BATCH_SIZE; i++) {
         uint32_t z_check = points[i].Z.data[0] | points[i].Z.data[1] | 
                           points[i].Z.data[2] | points[i].Z.data[3] |
@@ -1225,7 +1234,7 @@ __device__ void jacobian_batch_to_hash160(const ECPointJac points[BATCH_SIZE], u
         uint8_t pubkey[33];
         pubkey[0] = 0x02 | (y_affine.data[0] & 1);
         
-        #pragma unroll
+        
         for (int j = 0; j < 8; j++) {
             uint32_t word = x_affine.data[7 - j];
             int base = 1 + (j << 2);
