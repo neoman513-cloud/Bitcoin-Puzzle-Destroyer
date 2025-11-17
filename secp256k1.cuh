@@ -879,42 +879,6 @@ __device__ void sha256(const uint8_t* data, int len, uint8_t hash[32]) {
 
 
 
-__constant__ uint32_t c_K1[5] = {0x00000000, 0x5A827999, 0x6ED9EBA1, 0x8F1BBCDC, 0xA953FD4E};
-__constant__ uint32_t c_K2[5] = {0x50A28BE6, 0x5C4DD124, 0x6D703EF3, 0x7A6D76E9, 0x00000000};
-
-__constant__ int c_ZL[80] = {
-    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
-    7, 4, 13, 1, 10, 6, 15, 3, 12, 0, 9, 5, 2, 14, 11, 8,
-    3, 10, 14, 4, 9, 15, 8, 1, 2, 7, 0, 6, 13, 11, 5, 12,
-    1, 9, 11, 10, 0, 8, 12, 4, 13, 3, 7, 15, 14, 5, 6, 2,
-    4, 0, 5, 9, 7, 12, 2, 10, 14, 1, 3, 8, 11, 6, 15, 13
-};
-
-__constant__ int c_ZR[80] = {
-    5, 14, 7, 0, 9, 2, 11, 4, 13, 6, 15, 8, 1, 10, 3, 12,
-    6, 11, 3, 7, 0, 13, 5, 10, 14, 15, 8, 12, 4, 9, 1, 2,
-    15, 5, 1, 3, 7, 14, 6, 9, 11, 8, 12, 2, 10, 0, 4, 13,
-    8, 6, 4, 1, 3, 11, 15, 0, 5, 12, 2, 13, 9, 7, 10, 14,
-    12, 15, 10, 4, 1, 5, 8, 7, 6, 2, 13, 14, 0, 3, 9, 11
-};
-
-__constant__ int c_SL[80] = {
-    11, 14, 15, 12, 5, 8, 7, 9, 11, 13, 14, 15, 6, 7, 9, 8,
-    7, 6, 8, 13, 11, 9, 7, 15, 7, 12, 15, 9, 11, 7, 13, 12,
-    11, 13, 6, 7, 14, 9, 13, 15, 14, 8, 13, 6, 5, 12, 7, 5,
-    11, 12, 14, 15, 14, 15, 9, 8, 9, 14, 5, 6, 8, 6, 5, 12,
-    9, 15, 5, 11, 6, 8, 13, 12, 5, 12, 13, 14, 11, 8, 5, 6
-};
-
-__constant__ int c_SR[80] = {
-    8, 9, 9, 11, 13, 15, 15, 5, 7, 7, 8, 11, 14, 14, 12, 6,
-    9, 13, 15, 7, 12, 8, 9, 11, 7, 7, 12, 7, 6, 15, 13, 11,
-    9, 7, 15, 11, 8, 6, 6, 14, 12, 13, 5, 14, 13, 13, 7, 5,
-    15, 5, 8, 11, 14, 14, 6, 14, 6, 9, 12, 9, 12, 5, 15, 8,
-    8, 5, 12, 9, 12, 5, 14, 6, 8, 13, 6, 5, 15, 13, 11, 11
-};
-
-
 __device__ __forceinline__ uint32_t F(uint32_t x, uint32_t y, uint32_t z) {
     return x ^ y ^ z;
 }
@@ -936,99 +900,99 @@ __device__ __forceinline__ uint32_t J(uint32_t x, uint32_t y, uint32_t z) {
 }
 
 __device__ __forceinline__ uint32_t ROL(uint32_t x, int n) {
-    return (x << n) | (x >> (32 - n));
+    return __funnelshift_lc(x, x, n);
 }
 
-
-#define ROUND(a, b, c, d, e, func, x, s, k) \
-    do { \
-        uint32_t t = a + func(b, c, d) + x + k; \
-        t = ROL(t, s) + e; \
-        a = e; \
-        e = d; \
-        d = ROL(c, 10); \
-        c = b; \
-        b = t; \
-    } while(0)
 __device__ void ripemd160(const uint8_t* __restrict__ msg, 
                           uint8_t* __restrict__ out) {
     
     const uint32_t* msg32 = reinterpret_cast<const uint32_t*>(msg);
-    uint32_t X[16];
     
-    for (int i = 0; i < 8; i++) {
-        X[i] = msg32[i];
-    }
-    
-    X[8] = 0x80; X[9] = 0; X[10] = 0; X[11] = 0;
-    X[12] = 0; X[13] = 0; X[14] = 256; X[15] = 0;
+    uint32_t X0 = msg32[0], X1 = msg32[1], X2 = msg32[2], X3 = msg32[3];
+    uint32_t X4 = msg32[4], X5 = msg32[5], X6 = msg32[6], X7 = msg32[7];
+    uint32_t X8 = 0x80, X9 = 0, X10 = 0, X11 = 0;
+    uint32_t X12 = 0, X13 = 0, X14 = 256, X15 = 0;
     
     uint32_t AL = 0x67452301, BL = 0xEFCDAB89, CL = 0x98BADCFE;
     uint32_t DL = 0x10325476, EL = 0xC3D2E1F0;
-    uint32_t AR = AL, BR = BL, CR = CL, DR = DL, ER = EL;
- 
-    for (int j = 0; j < 16; j++) {
-        ROUND(AL, BL, CL, DL, EL, F, X[c_ZL[j]], c_SL[j], c_K1[0]);
-    }
+    uint32_t AR = 0x67452301, BR = 0xEFCDAB89, CR = 0x98BADCFE;
+    uint32_t DR = 0x10325476, ER = 0xC3D2E1F0;
+    
+    uint32_t tl, tr;
     
     
     
-    for (int j = 16; j < 32; j++) {
-        ROUND(AL, BL, CL, DL, EL, G, X[c_ZL[j]], c_SL[j], c_K1[1]);
-    }
+    
+    #define R0_15(i, xl, sl, xr, sr) \
+        tl = AL + F(BL,CL,DL) + xl; tl = ROL(tl,sl) + EL; AL = EL; EL = DL; DL = ROL(CL,10); CL = BL; BL = tl; \
+        tr = AR + J(BR,CR,DR) + xr + 0x50A28BE6; tr = ROL(tr,sr) + ER; AR = ER; ER = DR; DR = ROL(CR,10); CR = BR; BR = tr;
+    
+    R0_15(0, X0, 11, X5, 8);   R0_15(1, X1, 14, X14, 9);
+    R0_15(2, X2, 15, X7, 9);   R0_15(3, X3, 12, X0, 11);
+    R0_15(4, X4, 5, X9, 13);   R0_15(5, X5, 8, X2, 15);
+    R0_15(6, X6, 7, X11, 15);  R0_15(7, X7, 9, X4, 5);
+    R0_15(8, X8, 11, X13, 7);  R0_15(9, X9, 13, X6, 7);
+    R0_15(10, X10, 14, X15, 8); R0_15(11, X11, 15, X8, 11);
+    R0_15(12, X12, 6, X1, 14); R0_15(13, X13, 7, X10, 14);
+    R0_15(14, X14, 9, X3, 12); R0_15(15, X15, 8, X12, 6);
     
     
+    #define R16_31(i, xl, sl, xr, sr) \
+        tl = AL + G(BL,CL,DL) + xl + 0x5A827999; tl = ROL(tl,sl) + EL; AL = EL; EL = DL; DL = ROL(CL,10); CL = BL; BL = tl; \
+        tr = AR + I(BR,CR,DR) + xr + 0x5C4DD124; tr = ROL(tr,sr) + ER; AR = ER; ER = DR; DR = ROL(CR,10); CR = BR; BR = tr;
     
-    for (int j = 32; j < 48; j++) {
-        ROUND(AL, BL, CL, DL, EL, H, X[c_ZL[j]], c_SL[j], c_K1[2]);
-    }
-    
-    
-    
-    for (int j = 48; j < 64; j++) {
-        ROUND(AL, BL, CL, DL, EL, I, X[c_ZL[j]], c_SL[j], c_K1[3]);
-    }
-    
-    
-    
-    for (int j = 64; j < 80; j++) {
-        ROUND(AL, BL, CL, DL, EL, J, X[c_ZL[j]], c_SL[j], c_K1[4]);
-    }
+    R16_31(16, X7, 7, X6, 9);   R16_31(17, X4, 6, X11, 13);
+    R16_31(18, X13, 8, X3, 15); R16_31(19, X1, 13, X7, 7);
+    R16_31(20, X10, 11, X0, 12); R16_31(21, X6, 9, X13, 8);
+    R16_31(22, X15, 7, X5, 9);  R16_31(23, X3, 15, X10, 11);
+    R16_31(24, X12, 7, X14, 7); R16_31(25, X0, 12, X15, 7);
+    R16_31(26, X9, 15, X8, 12); R16_31(27, X5, 9, X12, 7);
+    R16_31(28, X2, 11, X4, 6);  R16_31(29, X14, 7, X9, 15);
+    R16_31(30, X11, 13, X1, 13); R16_31(31, X8, 12, X2, 11);
     
     
+    #define R32_47(i, xl, sl, xr, sr) \
+        tl = AL + H(BL,CL,DL) + xl + 0x6ED9EBA1; tl = ROL(tl,sl) + EL; AL = EL; EL = DL; DL = ROL(CL,10); CL = BL; BL = tl; \
+        tr = AR + H(BR,CR,DR) + xr + 0x6D703EF3; tr = ROL(tr,sr) + ER; AR = ER; ER = DR; DR = ROL(CR,10); CR = BR; BR = tr;
     
-    for (int j = 0; j < 16; j++) {
-        ROUND(AR, BR, CR, DR, ER, J, X[c_ZR[j]], c_SR[j], c_K2[0]);
-    }
-    
-    
-    
-    for (int j = 16; j < 32; j++) {
-        ROUND(AR, BR, CR, DR, ER, I, X[c_ZR[j]], c_SR[j], c_K2[1]);
-    }
-    
-    
-    
-    for (int j = 32; j < 48; j++) {
-        ROUND(AR, BR, CR, DR, ER, H, X[c_ZR[j]], c_SR[j], c_K2[2]);
-    }
+    R32_47(32, X3, 11, X15, 9);  R32_47(33, X10, 13, X5, 7);
+    R32_47(34, X14, 6, X1, 15);  R32_47(35, X4, 7, X3, 11);
+    R32_47(36, X9, 14, X7, 8);   R32_47(37, X15, 9, X14, 6);
+    R32_47(38, X8, 13, X6, 6);   R32_47(39, X1, 15, X9, 14);
+    R32_47(40, X2, 14, X11, 12); R32_47(41, X7, 8, X8, 13);
+    R32_47(42, X0, 13, X12, 5);  R32_47(43, X6, 6, X2, 14);
+    R32_47(44, X13, 5, X10, 13); R32_47(45, X11, 12, X0, 13);
+    R32_47(46, X5, 7, X4, 7);    R32_47(47, X12, 5, X13, 5);
     
     
+    #define R48_63(i, xl, sl, xr, sr) \
+        tl = AL + I(BL,CL,DL) + xl + 0x8F1BBCDC; tl = ROL(tl,sl) + EL; AL = EL; EL = DL; DL = ROL(CL,10); CL = BL; BL = tl; \
+        tr = AR + G(BR,CR,DR) + xr + 0x7A6D76E9; tr = ROL(tr,sr) + ER; AR = ER; ER = DR; DR = ROL(CR,10); CR = BR; BR = tr;
     
-    for (int j = 48; j < 64; j++) {
-        ROUND(AR, BR, CR, DR, ER, G, X[c_ZR[j]], c_SR[j], c_K2[3]);
-    }
+    R48_63(48, X1, 11, X8, 15);  R48_63(49, X9, 12, X6, 5);
+    R48_63(50, X11, 14, X4, 8);  R48_63(51, X10, 15, X1, 11);
+    R48_63(52, X0, 14, X3, 14);  R48_63(53, X8, 15, X11, 14);
+    R48_63(54, X12, 9, X15, 6);  R48_63(55, X4, 8, X0, 14);
+    R48_63(56, X13, 9, X5, 6);   R48_63(57, X3, 14, X12, 9);
+    R48_63(58, X7, 5, X2, 12);   R48_63(59, X15, 6, X13, 9);
+    R48_63(60, X14, 8, X9, 12);  R48_63(61, X5, 6, X7, 5);
+    R48_63(62, X6, 5, X10, 15);  R48_63(63, X2, 12, X14, 8);
     
     
+    #define R64_79(i, xl, sl, xr, sr) \
+        tl = AL + J(BL,CL,DL) + xl + 0xA953FD4E; tl = ROL(tl,sl) + EL; AL = EL; EL = DL; DL = ROL(CL,10); CL = BL; BL = tl; \
+        tr = AR + F(BR,CR,DR) + xr; tr = ROL(tr,sr) + ER; AR = ER; ER = DR; DR = ROL(CR,10); CR = BR; BR = tr;
     
-    for (int j = 64; j < 80; j++) {
-        ROUND(AR, BR, CR, DR, ER, F, X[c_ZR[j]], c_SR[j], c_K2[4]);
-    }
-    
-    
+    R64_79(64, X4, 9, X12, 8);   R64_79(65, X0, 15, X15, 5);
+    R64_79(66, X5, 5, X10, 12);  R64_79(67, X9, 11, X4, 9);
+    R64_79(68, X7, 6, X1, 12);   R64_79(69, X12, 8, X5, 5);
+    R64_79(70, X2, 13, X8, 14);  R64_79(71, X10, 12, X7, 6);
+    R64_79(72, X14, 5, X6, 8);   R64_79(73, X1, 12, X2, 13);
+    R64_79(74, X3, 13, X13, 6);  R64_79(75, X8, 14, X14, 5);
+    R64_79(76, X11, 11, X0, 15); R64_79(77, X6, 8, X3, 13);
+    R64_79(78, X15, 5, X9, 11);  R64_79(79, X13, 6, X11, 11);
     
     uint32_t T = 0xEFCDAB89 + CL + DR;
-    
     
     uint32_t* out32 = reinterpret_cast<uint32_t*>(out);
     out32[0] = T;
