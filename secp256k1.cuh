@@ -42,28 +42,55 @@ __host__ __device__ __forceinline__ void init_bigint(BigInt *x, uint32_t val) {
     for (int i = 1; i < BIGINT_WORDS; i++) x->data[i] = 0;
 }
 
-__host__ __device__ __forceinline__ void copy_bigint(BigInt *dest, const BigInt *src) {
-	
-    for (int i = 0; i < BIGINT_WORDS; i++) {
-        dest->data[i] = src->data[i];
-    }
+__device__ __forceinline__ void copy_bigint(BigInt *dest, const BigInt *src) {
+    // Assuming 16-byte alignment
+    uint4 *dest_vec = (uint4*)dest->data;
+    const uint4 *src_vec = (const uint4*)src->data;
+    
+    dest_vec[0] = src_vec[0];  // Loads/stores 4 words at once
+    dest_vec[1] = src_vec[1];
 }
 
-__host__ __device__ __forceinline__ int compare_bigint(const BigInt *a, const BigInt *b) {
-	
-    for (int i = BIGINT_WORDS - 1; i >= 0; i--) {
-        if (a->data[i] > b->data[i]) return 1;
-        if (a->data[i] < b->data[i]) return -1;
+__device__ __forceinline__ int compare_bigint(const BigInt *a, const BigInt *b) {
+    uint32_t gt = 0, lt = 0;
+    
+    for (int i = 7; i >= 0; i--) {
+        uint32_t a_word = a->data[i];
+        uint32_t b_word = b->data[i];
+        
+        // Compute comparison results using arithmetic
+        uint32_t gt_mask = (a_word > b_word) ? 0xFFFFFFFF : 0;
+        uint32_t lt_mask = (a_word < b_word) ? 0xFFFFFFFF : 0;
+        
+        // Update gt/lt only if all previous words were equal
+        uint32_t update_mask = (gt == 0 && lt == 0) ? 0xFFFFFFFF : 0;
+        gt |= (gt_mask & update_mask);
+        lt |= (lt_mask & update_mask);
     }
-    return 0;
+    
+    return gt ? 1 : (lt ? -1 : 0);
 }
 
-__host__ __device__ __forceinline__ bool is_zero(const BigInt *a) {
-	
-    for (int i = 0; i < BIGINT_WORDS; i++) {
-        if (a->data[i]) return false;
-    }
-    return true;
+__device__ __forceinline__ bool is_zero(const BigInt *a) {
+    uint32_t result;
+    
+    asm volatile(
+        "{\n\t"
+        ".reg .u32 t0, t1, t2, t3;\n\t"
+        "or.b32 t0, %1, %2;\n\t"
+        "or.b32 t1, %3, %4;\n\t"
+        "or.b32 t2, %5, %6;\n\t"
+        "or.b32 t3, %7, %8;\n\t"
+        "or.b32 t0, t0, t1;\n\t"
+        "or.b32 t2, t2, t3;\n\t"
+        "or.b32 %0, t0, t2;\n\t"
+        "}"
+        : "=r"(result)
+        : "r"(a->data[0]), "r"(a->data[1]), "r"(a->data[2]), "r"(a->data[3]),
+          "r"(a->data[4]), "r"(a->data[5]), "r"(a->data[6]), "r"(a->data[7])
+    );
+    
+    return (result == 0);
 }
 
 __host__ __device__ __forceinline__ int get_bit(const BigInt *a, int i) {
