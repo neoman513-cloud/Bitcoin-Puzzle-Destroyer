@@ -10,7 +10,7 @@
 #define MOD_EXP 4
 
 
-struct BigInt {
+struct __align__(16) BigInt {
     uint32_t data[BIGINT_WORDS];
 };
 
@@ -455,7 +455,7 @@ __device__ __forceinline__ void mul_mod_device(BigInt *res, const BigInt *a, con
     sum = (uint64_t)result[7] + carry;
     result[7] = (uint32_t)sum;
     
-    #pragma unroll
+    
     for (int i = 0; i < 8; i++) {
         res->data[i] = result[i];
     }
@@ -1164,26 +1164,39 @@ __device__ __forceinline__ void scalar_multiply_multi_base_jac(ECPointJac *resul
     
     int first_window = -1;
     
+    
     for (int window = NUM_BASE_POINTS - 1; window >= 0; window--) {
         int bit_index = window * WINDOW_SIZE;
         uint32_t word_idx = bit_index >> 5;  
-        uint32_t bit_offset = bit_index & 31; 
+        uint32_t bit_offset = bit_index & 31;
+        
+        uint32_t window_val;
         
         
-        uint32_t window_val = scalar->data[word_idx] >> bit_offset;
-        if (bit_offset + WINDOW_SIZE > 32) {
-            window_val |= scalar->data[word_idx + 1] << (32 - bit_offset);
+        if (bit_offset + WINDOW_SIZE <= 32) {
+            asm("bfe.u32 %0, %1, %2, %3;" 
+                : "=r"(window_val) 
+                : "r"(scalar->data[word_idx]), "r"(bit_offset), "r"(WINDOW_SIZE));
+        } else {
+            uint32_t lo = scalar->data[word_idx];
+            uint32_t hi = scalar->data[word_idx + 1];
+            uint32_t combined;
+            
+            asm("shf.r.wrap.b32 %0, %1, %2, %3;" 
+                : "=r"(combined) 
+                : "r"(lo), "r"(hi), "r"(bit_offset));
+            
+            asm("bfe.u32 %0, %1, 0, %2;" 
+                : "=r"(window_val) 
+                : "r"(combined), "r"(WINDOW_SIZE));
         }
-        window_val &= (1U << WINDOW_SIZE) - 1;
         
         if (window_val != 0) {
-            
             *result = G_base_precomp[window][window_val];
             first_window = window;
             break;
         }
     }
-    
     
     if (first_window == -1) {
         point_set_infinity_jac(result);
@@ -1196,31 +1209,61 @@ __device__ __forceinline__ void scalar_multiply_multi_base_jac(ECPointJac *resul
         uint32_t word_idx = bit_index >> 5;
         uint32_t bit_offset = bit_index & 31;
         
-        uint32_t window_val = scalar->data[word_idx] >> bit_offset;
-        if (bit_offset + WINDOW_SIZE > 32) {
-            window_val |= scalar->data[word_idx + 1] << (32 - bit_offset);
-        }
-        window_val &= (1U << WINDOW_SIZE) - 1;
+        uint32_t window_val;
         
-		ECPointJac temp = G_base_precomp[window][window_val];
-		if (window_val != 0) {
-			add_point_jac(result, result, &temp);
-		}
+        if (bit_offset + WINDOW_SIZE <= 32) {
+            asm("bfe.u32 %0, %1, %2, %3;" 
+                : "=r"(window_val) 
+                : "r"(scalar->data[word_idx]), "r"(bit_offset), "r"(WINDOW_SIZE));
+        } else {
+            uint32_t lo = scalar->data[word_idx];
+            uint32_t hi = scalar->data[word_idx + 1];
+            uint32_t combined;
+            
+            asm("shf.r.wrap.b32 %0, %1, %2, %3;" 
+                : "=r"(combined) 
+                : "r"(lo), "r"(hi), "r"(bit_offset));
+            
+            asm("bfe.u32 %0, %1, 0, %2;" 
+                : "=r"(window_val) 
+                : "r"(combined), "r"(WINDOW_SIZE));
+        }
+        
+        ECPointJac temp = G_base_precomp[window][window_val];
+        if (window_val != 0) {
+            add_point_jac(result, result, &temp);
+        }
     }
 }
 __device__ void jacobian_batch_to_hash160(const ECPointJac points[BATCH_SIZE], uint8_t hash160_out[BATCH_SIZE][20]) {
-    
     
     bool is_valid[BATCH_SIZE];
     uint8_t valid_indices[BATCH_SIZE];
     uint8_t valid_count = 0;
     
+    
     for (int i = 0; i < BATCH_SIZE; i++) {
         
-        uint32_t z_check = points[i].Z.data[0];
-        for (int j = 1; j < 8; j++) {
-            z_check |= points[i].Z.data[j];
-        }
+        uint32_t z_check;
+        
+        
+        uint4 z_vec0 = *((uint4*)&points[i].Z.data[0]);
+        uint4 z_vec1 = *((uint4*)&points[i].Z.data[4]);
+        
+        
+        asm("{\n\t"
+            ".reg .u32 t0, t1, t2, t3;\n\t"
+            "or.b32 t0, %1, %2;\n\t"
+            "or.b32 t1, %3, %4;\n\t"
+            "or.b32 t2, %5, %6;\n\t"
+            "or.b32 t3, %7, %8;\n\t"
+            "or.b32 t0, t0, t1;\n\t"
+            "or.b32 t2, t2, t3;\n\t"
+            "or.b32 %0, t0, t2;\n\t"
+            "}"
+            : "=r"(z_check)
+            : "r"(z_vec0.x), "r"(z_vec0.y), "r"(z_vec0.z), "r"(z_vec0.w),
+              "r"(z_vec1.x), "r"(z_vec1.y), "r"(z_vec1.z), "r"(z_vec1.w));
         
         is_valid[i] = (!points[i].infinity) && (z_check != 0);
         
@@ -1248,6 +1291,7 @@ __device__ void jacobian_batch_to_hash160(const ECPointJac points[BATCH_SIZE], u
         mul_mod_device(&products[i], &products[i-1], &points[valid_indices[i]].Z);
     }
     
+    
     BigInt current_inv;
     mod_inverse(&current_inv, &products[valid_count - 1]);
     
@@ -1262,10 +1306,11 @@ __device__ void jacobian_batch_to_hash160(const ECPointJac points[BATCH_SIZE], u
     for (int v = 0; v < valid_count; v++) {
         uint8_t idx = valid_indices[v];
         
-        BigInt Zinv2, Zinv3;
         
+        BigInt Zinv2, Zinv3;
         mul_mod_device(&Zinv2, &inverses[v], &inverses[v]);
         mul_mod_device(&Zinv3, &Zinv2, &inverses[v]);
+        
         
         BigInt x_affine, y_affine;
         mul_mod_device(&x_affine, &points[idx].X, &Zinv2);
@@ -1273,17 +1318,24 @@ __device__ void jacobian_batch_to_hash160(const ECPointJac points[BATCH_SIZE], u
         
         
         uint8_t pubkey[33];
-        pubkey[0] = 0x02 | (y_affine.data[0] & 1);
+        
+        
+        uint32_t parity;
+        asm("bfe.u32 %0, %1, 0, 1;" : "=r"(parity) : "r"(y_affine.data[0]));
+        pubkey[0] = 0x02 | parity;
         
         
         uint32_t* x_data = x_affine.data;
+        
         for (int j = 0; j < 8; j++) {
             uint32_t word = x_data[7 - j];
-            uint8_t* target = &pubkey[1 + (j << 2)];
-            target[0] = word >> 24;
-            target[1] = word >> 16;
-            target[2] = word >> 8;
-            target[3] = word;
+            uint32_t swapped;
+            
+            
+            asm("prmt.b32 %0, %1, 0, 0x0123;" : "=r"(swapped) : "r"(word));
+            
+            
+            *((uint32_t*)&pubkey[1 + j * 4]) = swapped;
         }
         
         

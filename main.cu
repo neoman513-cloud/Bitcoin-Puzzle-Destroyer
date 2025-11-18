@@ -149,7 +149,7 @@ __device__ void generate_random_in_range(BigInt* result, curandStatePhilox4_32_1
     BigInt range;
     
     bool borrow = false;
-    #pragma unroll
+    
     for (int i = 0; i < BIGINT_WORDS; ++i) {
         uint64_t diff = (uint64_t)max_val->data[i] - (uint64_t)min_val->data[i] - (borrow ? 1 : 0);
         range.data[i] = (uint32_t)diff;
@@ -158,7 +158,7 @@ __device__ void generate_random_in_range(BigInt* result, curandStatePhilox4_32_1
     
     
     BigInt random;
-    #pragma unroll
+    
     for (int w = 0; w < BIGINT_WORDS; w += 4) {
         uint4 r = curand4(state);
         if (w + 0 < BIGINT_WORDS) random.data[w + 0] = r.x;
@@ -169,7 +169,7 @@ __device__ void generate_random_in_range(BigInt* result, curandStatePhilox4_32_1
     
     
     int highest_word = BIGINT_WORDS - 1;
-    #pragma unroll
+    
     while (highest_word >= 0 && range.data[highest_word] == 0) {
         highest_word--;
     }
@@ -189,14 +189,14 @@ __device__ void generate_random_in_range(BigInt* result, curandStatePhilox4_32_1
                      : "r"(random.data[highest_word]), "r"(mask));
         
         
-        #pragma unroll
+        
         for (int i = highest_word + 1; i < BIGINT_WORDS; ++i) {
             asm volatile ("mov.b32 %0, 0;" : "=r"(random.data[i]));
         }
         
         
         bool greater = false;
-        #pragma unroll
+        
         for (int i = BIGINT_WORDS - 1; i >= 0; --i) {
             if (random.data[i] > range.data[i]) {
                 greater = true;
@@ -208,7 +208,7 @@ __device__ void generate_random_in_range(BigInt* result, curandStatePhilox4_32_1
         
         
         if (greater) {
-            #pragma unroll
+            
             for (int i = 0; i < BIGINT_WORDS; ++i) {
                 uint32_t divisor = range.data[i] + 1;
                 if (divisor != 0) {  
@@ -221,7 +221,7 @@ __device__ void generate_random_in_range(BigInt* result, curandStatePhilox4_32_1
         }
     }
     
-    #pragma unroll
+    
     for (int i = 0; i < BIGINT_WORDS; ++i) {
         uint32_t r_word = random.data[i];
         uint32_t min_word = min_val->data[i];
@@ -274,7 +274,7 @@ __global__ void start(uint64_t seed)
     }
     
     jacobian_batch_to_hash160(result_jac_batch, hash160_batch);
-
+	
     for (int i = 0; i < BATCH_SIZE; ++i) {
         if (compare_hash160_fast(hash160_batch[i], d_target) && atomicCAS((int*)&g_found, 0, 1) == 0) {
             
