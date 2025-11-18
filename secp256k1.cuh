@@ -781,45 +781,116 @@ __device__ void double_point_jac(ECPointJac *R, const ECPointJac *P) {
 __device__ __forceinline__ void add_point_jac(ECPointJac *R, const ECPointJac *P, const ECPointJac *Q) {
     
     if (__builtin_expect(P->infinity, 0)) { 
-        point_copy_jac(R, Q); 
+        
+        uint4 *R_x = (uint4*)R->X.data;
+        uint4 *R_y = (uint4*)R->Y.data;
+        uint4 *R_z = (uint4*)R->Z.data;
+        const uint4 *Q_x = (const uint4*)Q->X.data;
+        const uint4 *Q_y = (const uint4*)Q->Y.data;
+        const uint4 *Q_z = (const uint4*)Q->Z.data;
+        
+        R_x[0] = Q_x[0]; R_x[1] = Q_x[1];
+        R_y[0] = Q_y[0]; R_y[1] = Q_y[1];
+        R_z[0] = Q_z[0]; R_z[1] = Q_z[1];
+        R->infinity = Q->infinity;
         return; 
     }
     if (__builtin_expect(Q->infinity, 0)) { 
-        point_copy_jac(R, P); 
+        uint4 *R_x = (uint4*)R->X.data;
+        uint4 *R_y = (uint4*)R->Y.data;
+        uint4 *R_z = (uint4*)R->Z.data;
+        const uint4 *P_x = (const uint4*)P->X.data;
+        const uint4 *P_y = (const uint4*)P->Y.data;
+        const uint4 *P_z = (const uint4*)P->Z.data;
+        
+        R_x[0] = P_x[0]; R_x[1] = P_x[1];
+        R_y[0] = P_y[0]; R_y[1] = P_y[1];
+        R_z[0] = P_z[0]; R_z[1] = P_z[1];
+        R->infinity = P->infinity;
         return; 
     }
     
-    union TempStorage {
-        struct {
-            BigInt Z1Z1, Z2Z2, U1, U2, H;
-            BigInt S1, S2, R_big, HH, HHH;
-        } vars;
-        BigInt temp_array[9];
-    } temp;
+    
+    BigInt Z1Z1, Z2Z2, U1, U2, H, S1, S2, R_big;
+    BigInt HH, HHH, temp;
     
     
-    mul_mod_device(&temp.vars.Z1Z1, &P->Z, &P->Z);
-    
-    mul_mod_device(&temp.vars.Z2Z2, &Q->Z, &Q->Z);
     
     
-    mul_mod_device(&temp.vars.U1, &P->X, &temp.vars.Z2Z2);
-    
-    mul_mod_device(&temp.vars.U2, &Q->X, &temp.vars.Z1Z1);
-    
-    
-    mul_mod_device(&temp.vars.S1, &temp.vars.Z2Z2, &Q->Z);
-    mul_mod_device(&temp.vars.S1, &P->Y, &temp.vars.S1);
+    mul_mod_device(&Z1Z1, &P->Z, &P->Z);
+    mul_mod_device(&Z2Z2, &Q->Z, &Q->Z);
     
     
-    mul_mod_device(&temp.vars.S2, &temp.vars.Z1Z1, &P->Z);
-    mul_mod_device(&temp.vars.S2, &Q->Y, &temp.vars.S2);
+    mul_mod_device(&U1, &P->X, &Z2Z2);
+    mul_mod_device(&U2, &Q->X, &Z1Z1);
     
     
-    sub_mod_device_fast(&temp.vars.H, &temp.vars.U2, &temp.vars.U1);
     
-    if (__builtin_expect(is_zero(&temp.vars.H), 0)) {
-        if (compare_bigint(&temp.vars.S1, &temp.vars.S2) != 0) {
+    asm volatile(
+        "sub.cc.u32 %0, %8, %16;\n\t"
+        "subc.cc.u32 %1, %9, %17;\n\t"
+        "subc.cc.u32 %2, %10, %18;\n\t"
+        "subc.cc.u32 %3, %11, %19;\n\t"
+        "subc.cc.u32 %4, %12, %20;\n\t"
+        "subc.cc.u32 %5, %13, %21;\n\t"
+        "subc.cc.u32 %6, %14, %22;\n\t"
+        "subc.cc.u32 %7, %15, %23;\n\t"
+        : "=r"(H.data[0]), "=r"(H.data[1]), "=r"(H.data[2]), "=r"(H.data[3]),
+          "=r"(H.data[4]), "=r"(H.data[5]), "=r"(H.data[6]), "=r"(H.data[7])
+        : "r"(U2.data[0]), "r"(U2.data[1]), "r"(U2.data[2]), "r"(U2.data[3]),
+          "r"(U2.data[4]), "r"(U2.data[5]), "r"(U2.data[6]), "r"(U2.data[7]),
+          "r"(U1.data[0]), "r"(U1.data[1]), "r"(U1.data[2]), "r"(U1.data[3]),
+          "r"(U1.data[4]), "r"(U1.data[5]), "r"(U1.data[6]), "r"(U1.data[7])
+    );
+    
+    
+    uint32_t borrow;
+    asm volatile("subc.u32 %0, 0, 0;" : "=r"(borrow));
+    if (borrow) {
+        asm volatile(
+            "add.cc.u32 %0, %0, %8;\n\t"
+            "addc.cc.u32 %1, %1, %9;\n\t"
+            "addc.cc.u32 %2, %2, %10;\n\t"
+            "addc.cc.u32 %3, %3, %11;\n\t"
+            "addc.cc.u32 %4, %4, %12;\n\t"
+            "addc.cc.u32 %5, %5, %13;\n\t"
+            "addc.cc.u32 %6, %6, %14;\n\t"
+            "addc.u32 %7, %7, %15;\n\t"
+            : "+r"(H.data[0]), "+r"(H.data[1]), "+r"(H.data[2]), "+r"(H.data[3]),
+              "+r"(H.data[4]), "+r"(H.data[5]), "+r"(H.data[6]), "+r"(H.data[7])
+            : "r"(const_p.data[0]), "r"(const_p.data[1]), "r"(const_p.data[2]), "r"(const_p.data[3]),
+              "r"(const_p.data[4]), "r"(const_p.data[5]), "r"(const_p.data[6]), "r"(const_p.data[7])
+        );
+    }
+    
+    
+    uint32_t h_check;
+    asm volatile(
+        "{\n\t"
+        ".reg .u32 t0, t1, t2, t3;\n\t"
+        "or.b32 t0, %1, %2;\n\t"
+        "or.b32 t1, %3, %4;\n\t"
+        "or.b32 t2, %5, %6;\n\t"
+        "or.b32 t3, %7, %8;\n\t"
+        "or.b32 t0, t0, t1;\n\t"
+        "or.b32 t2, t2, t3;\n\t"
+        "or.b32 %0, t0, t2;\n\t"
+        "}"
+        : "=r"(h_check)
+        : "r"(H.data[0]), "r"(H.data[1]), "r"(H.data[2]), "r"(H.data[3]),
+          "r"(H.data[4]), "r"(H.data[5]), "r"(H.data[6]), "r"(H.data[7])
+    );
+    
+    
+    if (__builtin_expect(h_check == 0, 0)) {
+        BigInt Z1Z1Z1, Z2Z2Z2;
+        
+        mul_mod_device(&Z1Z1Z1, &Z1Z1, &P->Z);
+        mul_mod_device(&Z2Z2Z2, &Z2Z2, &Q->Z);
+        mul_mod_device(&S1, &P->Y, &Z2Z2Z2);
+        mul_mod_device(&S2, &Q->Y, &Z1Z1Z1);
+        
+        if (compare_bigint(&S1, &S2) != 0) {
             point_set_infinity_jac(R);
         } else {
             double_point_jac(R, P);
@@ -828,36 +899,171 @@ __device__ __forceinline__ void add_point_jac(ECPointJac *R, const ECPointJac *P
     }
     
     
-    sub_mod_device_fast(&temp.vars.R_big, &temp.vars.S2, &temp.vars.S1);
+    mul_mod_device(&temp, &Z2Z2, &Q->Z);
+    mul_mod_device(&S1, &P->Y, &temp);
+    
+    mul_mod_device(&temp, &Z1Z1, &P->Z);
+    mul_mod_device(&S2, &Q->Y, &temp);
     
     
-    mul_mod_device(&temp.vars.HH, &temp.vars.H, &temp.vars.H);
+    asm volatile(
+        "sub.cc.u32 %0, %8, %16;\n\t"
+        "subc.cc.u32 %1, %9, %17;\n\t"
+        "subc.cc.u32 %2, %10, %18;\n\t"
+        "subc.cc.u32 %3, %11, %19;\n\t"
+        "subc.cc.u32 %4, %12, %20;\n\t"
+        "subc.cc.u32 %5, %13, %21;\n\t"
+        "subc.cc.u32 %6, %14, %22;\n\t"
+        "subc.cc.u32 %7, %15, %23;\n\t"
+        : "=r"(R_big.data[0]), "=r"(R_big.data[1]), "=r"(R_big.data[2]), "=r"(R_big.data[3]),
+          "=r"(R_big.data[4]), "=r"(R_big.data[5]), "=r"(R_big.data[6]), "=r"(R_big.data[7])
+        : "r"(S2.data[0]), "r"(S2.data[1]), "r"(S2.data[2]), "r"(S2.data[3]),
+          "r"(S2.data[4]), "r"(S2.data[5]), "r"(S2.data[6]), "r"(S2.data[7]),
+          "r"(S1.data[0]), "r"(S1.data[1]), "r"(S1.data[2]), "r"(S1.data[3]),
+          "r"(S1.data[4]), "r"(S1.data[5]), "r"(S1.data[6]), "r"(S1.data[7])
+    );
     
-    mul_mod_device(&temp.vars.HHH, &temp.vars.HH, &temp.vars.H);
+    asm volatile("subc.u32 %0, 0, 0;" : "=r"(borrow));
+    if (borrow) {
+        asm volatile(
+            "add.cc.u32 %0, %0, %8;\n\t"
+            "addc.cc.u32 %1, %1, %9;\n\t"
+            "addc.cc.u32 %2, %2, %10;\n\t"
+            "addc.cc.u32 %3, %3, %11;\n\t"
+            "addc.cc.u32 %4, %4, %12;\n\t"
+            "addc.cc.u32 %5, %5, %13;\n\t"
+            "addc.cc.u32 %6, %6, %14;\n\t"
+            "addc.u32 %7, %7, %15;\n\t"
+            : "+r"(R_big.data[0]), "+r"(R_big.data[1]), "+r"(R_big.data[2]), "+r"(R_big.data[3]),
+              "+r"(R_big.data[4]), "+r"(R_big.data[5]), "+r"(R_big.data[6]), "+r"(R_big.data[7])
+            : "r"(const_p.data[0]), "r"(const_p.data[1]), "r"(const_p.data[2]), "r"(const_p.data[3]),
+              "r"(const_p.data[4]), "r"(const_p.data[5]), "r"(const_p.data[6]), "r"(const_p.data[7])
+        );
+    }
     
     
-    mul_mod_device(&temp.vars.U2, &temp.vars.U1, &temp.vars.HH);
+    mul_mod_device(&HH, &H, &H);
+    mul_mod_device(&HHH, &HH, &H);
     
     
-    mul_mod_device(&R->X, &temp.vars.R_big, &temp.vars.R_big);
-    sub_mod_device_fast(&R->X, &R->X, &temp.vars.HHH);
-    sub_mod_device_fast(&R->X, &R->X, &temp.vars.U2);
-    sub_mod_device_fast(&R->X, &R->X, &temp.vars.U2);
+    mul_mod_device(&U2, &U1, &HH);  
     
     
-    sub_mod_device_fast(&temp.vars.U1, &temp.vars.U2, &R->X);
-    mul_mod_device(&temp.vars.U1, &temp.vars.R_big, &temp.vars.U1);
-    mul_mod_device(&temp.vars.S1, &temp.vars.S1, &temp.vars.HHH);
-    sub_mod_device_fast(&R->Y, &temp.vars.U1, &temp.vars.S1);
+    mul_mod_device(&R->X, &R_big, &R_big);
     
+    
+    asm volatile(
+        "sub.cc.u32 %0, %0, %8;\n\t"
+        "subc.cc.u32 %1, %1, %9;\n\t"
+        "subc.cc.u32 %2, %2, %10;\n\t"
+        "subc.cc.u32 %3, %3, %11;\n\t"
+        "subc.cc.u32 %4, %4, %12;\n\t"
+        "subc.cc.u32 %5, %5, %13;\n\t"
+        "subc.cc.u32 %6, %6, %14;\n\t"
+        "subc.cc.u32 %7, %7, %15;\n\t"
+        : "+r"(R->X.data[0]), "+r"(R->X.data[1]), "+r"(R->X.data[2]), "+r"(R->X.data[3]),
+          "+r"(R->X.data[4]), "+r"(R->X.data[5]), "+r"(R->X.data[6]), "+r"(R->X.data[7])
+        : "r"(HHH.data[0]), "r"(HHH.data[1]), "r"(HHH.data[2]), "r"(HHH.data[3]),
+          "r"(HHH.data[4]), "r"(HHH.data[5]), "r"(HHH.data[6]), "r"(HHH.data[7])
+    );
+    asm volatile("subc.u32 %0, 0, 0;" : "=r"(borrow));
+    if (borrow) {
+        ptx_u256Add(&R->X, &R->X, &const_p);
+    }
+    
+    
+    asm volatile(
+        "sub.cc.u32 %0, %0, %8;\n\t"
+        "subc.cc.u32 %1, %1, %9;\n\t"
+        "subc.cc.u32 %2, %2, %10;\n\t"
+        "subc.cc.u32 %3, %3, %11;\n\t"
+        "subc.cc.u32 %4, %4, %12;\n\t"
+        "subc.cc.u32 %5, %5, %13;\n\t"
+        "subc.cc.u32 %6, %6, %14;\n\t"
+        "subc.cc.u32 %7, %7, %15;\n\t"
+        : "+r"(R->X.data[0]), "+r"(R->X.data[1]), "+r"(R->X.data[2]), "+r"(R->X.data[3]),
+          "+r"(R->X.data[4]), "+r"(R->X.data[5]), "+r"(R->X.data[6]), "+r"(R->X.data[7])
+        : "r"(U2.data[0]), "r"(U2.data[1]), "r"(U2.data[2]), "r"(U2.data[3]),
+          "r"(U2.data[4]), "r"(U2.data[5]), "r"(U2.data[6]), "r"(U2.data[7])
+    );
+    asm volatile("subc.u32 %0, 0, 0;" : "=r"(borrow));
+    if (borrow) {
+        ptx_u256Add(&R->X, &R->X, &const_p);
+    }
+    
+    
+    asm volatile(
+        "sub.cc.u32 %0, %0, %8;\n\t"
+        "subc.cc.u32 %1, %1, %9;\n\t"
+        "subc.cc.u32 %2, %2, %10;\n\t"
+        "subc.cc.u32 %3, %3, %11;\n\t"
+        "subc.cc.u32 %4, %4, %12;\n\t"
+        "subc.cc.u32 %5, %5, %13;\n\t"
+        "subc.cc.u32 %6, %6, %14;\n\t"
+        "subc.cc.u32 %7, %7, %15;\n\t"
+        : "+r"(R->X.data[0]), "+r"(R->X.data[1]), "+r"(R->X.data[2]), "+r"(R->X.data[3]),
+          "+r"(R->X.data[4]), "+r"(R->X.data[5]), "+r"(R->X.data[6]), "+r"(R->X.data[7])
+        : "r"(U2.data[0]), "r"(U2.data[1]), "r"(U2.data[2]), "r"(U2.data[3]),
+          "r"(U2.data[4]), "r"(U2.data[5]), "r"(U2.data[6]), "r"(U2.data[7])
+    );
+    asm volatile("subc.u32 %0, 0, 0;" : "=r"(borrow));
+    if (borrow) {
+        ptx_u256Add(&R->X, &R->X, &const_p);
+    }
+    
+    
+    
+    asm volatile(
+        "sub.cc.u32 %0, %8, %16;\n\t"
+        "subc.cc.u32 %1, %9, %17;\n\t"
+        "subc.cc.u32 %2, %10, %18;\n\t"
+        "subc.cc.u32 %3, %11, %19;\n\t"
+        "subc.cc.u32 %4, %12, %20;\n\t"
+        "subc.cc.u32 %5, %13, %21;\n\t"
+        "subc.cc.u32 %6, %14, %22;\n\t"
+        "subc.cc.u32 %7, %15, %23;\n\t"
+        : "=r"(temp.data[0]), "=r"(temp.data[1]), "=r"(temp.data[2]), "=r"(temp.data[3]),
+          "=r"(temp.data[4]), "=r"(temp.data[5]), "=r"(temp.data[6]), "=r"(temp.data[7])
+        : "r"(U2.data[0]), "r"(U2.data[1]), "r"(U2.data[2]), "r"(U2.data[3]),
+          "r"(U2.data[4]), "r"(U2.data[5]), "r"(U2.data[6]), "r"(U2.data[7]),
+          "r"(R->X.data[0]), "r"(R->X.data[1]), "r"(R->X.data[2]), "r"(R->X.data[3]),
+          "r"(R->X.data[4]), "r"(R->X.data[5]), "r"(R->X.data[6]), "r"(R->X.data[7])
+    );
+    asm volatile("subc.u32 %0, 0, 0;" : "=r"(borrow));
+    if (borrow) {
+        ptx_u256Add(&temp, &temp, &const_p);
+    }
+    
+    mul_mod_device(&temp, &R_big, &temp);
+    mul_mod_device(&S1, &S1, &HHH);
+    
+    
+    asm volatile(
+        "sub.cc.u32 %0, %8, %16;\n\t"
+        "subc.cc.u32 %1, %9, %17;\n\t"
+        "subc.cc.u32 %2, %10, %18;\n\t"
+        "subc.cc.u32 %3, %11, %19;\n\t"
+        "subc.cc.u32 %4, %12, %20;\n\t"
+        "subc.cc.u32 %5, %13, %21;\n\t"
+        "subc.cc.u32 %6, %14, %22;\n\t"
+        "subc.cc.u32 %7, %15, %23;\n\t"
+        : "=r"(R->Y.data[0]), "=r"(R->Y.data[1]), "=r"(R->Y.data[2]), "=r"(R->Y.data[3]),
+          "=r"(R->Y.data[4]), "=r"(R->Y.data[5]), "=r"(R->Y.data[6]), "=r"(R->Y.data[7])
+        : "r"(temp.data[0]), "r"(temp.data[1]), "r"(temp.data[2]), "r"(temp.data[3]),
+          "r"(temp.data[4]), "r"(temp.data[5]), "r"(temp.data[6]), "r"(temp.data[7]),
+          "r"(S1.data[0]), "r"(S1.data[1]), "r"(S1.data[2]), "r"(S1.data[3]),
+          "r"(S1.data[4]), "r"(S1.data[5]), "r"(S1.data[6]), "r"(S1.data[7])
+    );
+    asm volatile("subc.u32 %0, 0, 0;" : "=r"(borrow));
+    if (borrow) {
+        ptx_u256Add(&R->Y, &R->Y, &const_p);
+    }
     
     mul_mod_device(&R->Z, &P->Z, &Q->Z);
-    mul_mod_device(&R->Z, &R->Z, &temp.vars.H);
+    mul_mod_device(&R->Z, &R->Z, &H);
     
     R->infinity = false;
 }
-
-
 __constant__ uint32_t c_K[64] = {
     0x428a2f98ul,0x71374491ul,0xb5c0fbcful,0xe9b5dba5ul,
     0x3956c25bul,0x59f111f1ul,0x923f82a4ul,0xab1c5ed5ul,
@@ -905,59 +1111,85 @@ __device__ __forceinline__ uint32_t sigma1(uint32_t x) {
     return rotr(x, 17) ^ rotr(x, 19) ^ (x >> 10);
 }
 
-__device__ void sha256(const uint8_t* data, int len, uint8_t hash[32]) {
-    uint32_t h0 = 0x6a09e667ul, h1 = 0xbb67ae85ul, h2 = 0x3c6ef372ul, h3 = 0xa54ff53aul;
-    uint32_t h4 = 0x510e527ful, h5 = 0x9b05688cul, h6 = 0x1f83d9abul, h7 = 0x5be0cd19ul;
+__device__ __forceinline__ void sha256(const uint8_t* data, int len, uint8_t hash[32]) {
     
-    uint32_t w[64];
-    const uint32_t* data32 = (const uint32_t*)data;
-    int len_aligned = len & ~3;
-    
-    for (int i = 0; i < 16; ++i) {
-        int offset = i * 4;
-        if (offset < len_aligned) {
-            w[i] = __byte_perm(data32[i], 0, 0x0123);
-        } else if (offset < len) {
-            uint32_t val = 0;
-            for (int j = 0; j < 4 && offset + j < len; ++j) {
-                val |= ((uint32_t)data[offset + j]) << (24 - j * 8);
-            }
-            if (offset + 4 > len) val |= 0x80u << (24 - (len - offset) * 8);
-            w[i] = val;
-        } else if (offset == len) {
-            w[i] = 0x80000000u;
-        } else {
-            w[i] = (i == 15) ? (uint32_t)(len * 8) : 0;
-        }
-    }
-    
-    for (int i = 16; i < 64; ++i) {
-        w[i] = w[i - 16] + sigma0(w[i - 15]) + w[i - 7] + sigma1(w[i - 2]);
-    }
-    
-    uint32_t a = h0, b = h1, c = h2, d = h3;
-    uint32_t e = h4, f = h5, g = h6, h = h7;
-    
-    for (int i = 0; i < 64; ++i) {
-        uint32_t s1 = Sigma1(e);
-        uint32_t ch = Ch(e, f, g);
-        uint32_t temp1 = h + s1 + ch + c_K[i] + w[i];
-        uint32_t s0 = Sigma0(a);
-        uint32_t maj = Maj(a, b, c);
-        uint32_t temp2 = s0 + maj;
+    uint32_t h0 = 0x6a09e667ul;
+    uint32_t h1 = 0xbb67ae85ul;
+    uint32_t h2 = 0x3c6ef372ul;
+    uint32_t h3 = 0xa54ff53aul;
+    uint32_t h4 = 0x510e527ful;
+    uint32_t h5 = 0x9b05688cul;
+    uint32_t h6 = 0x1f83d9abul;
+    uint32_t h7 = 0x5be0cd19ul;
+
+    uint32_t a = h0;
+    uint32_t b = h1;
+    uint32_t c = h2;
+    uint32_t d = h3;
+    uint32_t e = h4;
+    uint32_t f = h5;
+    uint32_t g = h6;
+    uint32_t h = h7;
+
+    uint32_t w[16];
+
+    for (int i = 0; i < 16; i++) {
+        int off = i * 4;
+        uint32_t val = 0;
         
-        h = g; 
-        g = f; 
-        f = e;
-        e = d + temp1;
-        d = c; 
-        c = b; 
-        b = a;
-        a = temp1 + temp2;
+        if (off < len) val |= ((uint32_t)data[off]) << 24;
+        if (off + 1 < len) val |= ((uint32_t)data[off + 1]) << 16;
+        if (off + 2 < len) val |= ((uint32_t)data[off + 2]) << 8;
+        if (off + 3 < len) val |= ((uint32_t)data[off + 3]);
+        
+        if (off <= len && len < off + 4) {
+            int pad_pos = len - off;
+            val |= 0x80u << (24 - pad_pos * 8);
+        }
+        
+        if (i == 14) {
+            val = 0;
+        }
+        if (i == 15) {
+            val = len * 8;
+        }
+        
+        w[i] = val;
     }
-    
-    h0 += a; h1 += b; h2 += c; h3 += d;
-    h4 += e; h5 += f; h6 += g; h7 += h;
+
+    #define ROUND(wi, ki) { \
+        uint32_t t1 = h + Sigma1(e) + Ch(e, f, g) + ki + wi; \
+        uint32_t t2 = Sigma0(a) + Maj(a, b, c); \
+        h = g; g = f; f = e; e = d + t1; \
+        d = c; c = b; b = a; a = t1 + t2; \
+    }
+
+    ROUND(w[0], c_K[0]); ROUND(w[1], c_K[1]); ROUND(w[2], c_K[2]); ROUND(w[3], c_K[3]);
+    ROUND(w[4], c_K[4]); ROUND(w[5], c_K[5]); ROUND(w[6], c_K[6]); ROUND(w[7], c_K[7]);
+    ROUND(w[8], c_K[8]); ROUND(w[9], c_K[9]); ROUND(w[10], c_K[10]); ROUND(w[11], c_K[11]);
+    ROUND(w[12], c_K[12]); ROUND(w[13], c_K[13]); ROUND(w[14], c_K[14]); ROUND(w[15], c_K[15]);
+
+    #define EXTEND_ROUND(i) { \
+        uint32_t s0 = sigma0(w[(i-15) & 15]); \
+        uint32_t s1 = sigma1(w[(i-2) & 15]); \
+        w[i & 15] = w[(i-16) & 15] + s0 + w[(i-7) & 15] + s1; \
+        ROUND(w[i & 15], c_K[i]); \
+    }
+
+    EXTEND_ROUND(16); EXTEND_ROUND(17); EXTEND_ROUND(18); EXTEND_ROUND(19);
+    EXTEND_ROUND(20); EXTEND_ROUND(21); EXTEND_ROUND(22); EXTEND_ROUND(23);
+    EXTEND_ROUND(24); EXTEND_ROUND(25); EXTEND_ROUND(26); EXTEND_ROUND(27);
+    EXTEND_ROUND(28); EXTEND_ROUND(29); EXTEND_ROUND(30); EXTEND_ROUND(31);
+    EXTEND_ROUND(32); EXTEND_ROUND(33); EXTEND_ROUND(34); EXTEND_ROUND(35);
+    EXTEND_ROUND(36); EXTEND_ROUND(37); EXTEND_ROUND(38); EXTEND_ROUND(39);
+    EXTEND_ROUND(40); EXTEND_ROUND(41); EXTEND_ROUND(42); EXTEND_ROUND(43);
+    EXTEND_ROUND(44); EXTEND_ROUND(45); EXTEND_ROUND(46); EXTEND_ROUND(47);
+    EXTEND_ROUND(48); EXTEND_ROUND(49); EXTEND_ROUND(50); EXTEND_ROUND(51);
+    EXTEND_ROUND(52); EXTEND_ROUND(53); EXTEND_ROUND(54); EXTEND_ROUND(55);
+    EXTEND_ROUND(56); EXTEND_ROUND(57); EXTEND_ROUND(58); EXTEND_ROUND(59);
+    EXTEND_ROUND(60); EXTEND_ROUND(61); EXTEND_ROUND(62); EXTEND_ROUND(63);
+
+    h0 += a; h1 += b; h2 += c; h3 += d; h4 += e; h5 += f; h6 += g; h7 += h;
 
     uint32_t* out = (uint32_t*)hash;
     out[0] = __byte_perm(h0, 0, 0x0123);
