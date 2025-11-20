@@ -41,7 +41,3 @@ also in secp256k1.cuh there are few parameters at top of the file that you can c
 BTC for donations:
 
 `bc1q8n38pk3urztlt4vceq0h089l9jdcw58l2c0e80`
-
-contacts:
-
-https://t.me/biernus
