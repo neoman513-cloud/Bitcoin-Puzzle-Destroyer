@@ -2,6 +2,8 @@ This is a Hand-Made project
 
 This program searches for Bitcoin Puzzles (or any other BTC address) on any range
 
+if you want to search with a bloomfile - take this one https://github.com/neoman513-cloud/Bloom-Searcher
+
 THIS IS PURE TRUE UNBIASED RANDOM, with real speed, not fake
 
 it uses a Cuda specialized random distribution that is Curand + CPU crypto secure random combined and millions of threads, no overlaps
